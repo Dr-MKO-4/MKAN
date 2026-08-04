@@ -24,3 +24,6 @@ checkpoints/
 # OS
 .DS_Store
 Thumbs.db
+
+# Notes internes
+instruction_et_code.txt

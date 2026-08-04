@@ -96,6 +96,7 @@ model = MKANScorer(
 | `symbolic.py` | Régression symbolique sur les courbes d'arêtes (eq. 2.23) |
 | `audit.py` | Élagage + rapport d'audit COBAC (eq. 4.28, section 4.4.7) |
 | `visualizer.py` | 7 visualisations Plotly : loss, métriques, heatmap L1, courbes φᵢⱼ, élagage |
+| `heuristic_search.py` | Recherche heuristique (algorithme génétique) des hyperparamètres : mutation adaptative, contrôle de diversité, modèle EDA |
 
 ## Installation
 
@@ -139,11 +140,15 @@ Le fichier `featuresLog.parquet` (généré par `MOMTSIM/main.py`) doit être pl
 
 Voir [`train.ipynb`](train.ipynb) pour le pipeline complet :
 1. Chargement `featuresLog.parquet` → normalisation → fenêtres glissantes W=10
-2. Entraînement `MKANScorer` (40 epochs, Adam, lr=1e-3)
-3. Évaluation : MCC, AUC-ROC, PR-AUC, Score de Brier
-4. Détection de dérive JS + extension de grille adaptative
-5. Élagage + régression symbolique → rapport d'audit COBAC
-6. Visualisations Plotly interactives
+2. Split train/val/test + construction des DataLoaders
+3. Évaluation des features (SHAP/importance)
+4. Pré-traitement avancé (SMOTE, normalisation)
+5. **Recherche heuristique des hyperparamètres** (`heuristic_search.py`) — algorithme génétique sur `ESPACE_MKAN_DEFAULT` ou `ESPACE_MKAN_ETENDU` (9 HP dont W et batch_size)
+6. Entraînement `MKANScorer` avec warm start depuis les meilleurs poids trouvés (Adam, lr optimisé)
+7. Évaluation : MCC, AUC-ROC, PR-AUC, Score de Brier
+8. Détection de dérive JS + extension de grille adaptative
+9. Élagage + régression symbolique → rapport d'audit COBAC
+10. Visualisations Plotly interactives
 
 ## Métriques (section 3.4 du mémoire)
 
