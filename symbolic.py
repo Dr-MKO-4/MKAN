@@ -87,7 +87,7 @@ def fit_symbolic_candidate(
     optimizer = torch.optim.Adam([a, b, c, d], lr=lr)
 
     for _ in range(n_steps):
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         pred = c * fn(a * x_t + b) + d
         if torch.isnan(pred).any() or torch.isinf(pred).any():
             return {"a": float("nan"), "b": float("nan"),

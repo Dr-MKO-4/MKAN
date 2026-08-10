@@ -39,7 +39,7 @@ def edge_l1_matrix(layer: HybridKANLayer, x_pool: torch.Tensor) -> np.ndarray:
     Returns:
         l1_mat : (in_features, out_features) float64 numpy
     """
-    with torch.no_grad():
+    with torch.inference_mode():
         edges = layer.edge_activations(x_pool)   # (batch, in, out)
     return edges.abs().mean(dim=0).cpu().numpy()  # (in, out)
 
@@ -83,7 +83,7 @@ def evaluate_edge_curve(
     N = x_grid_t.shape[0]
     x = torch.zeros(N, layer.in_features, device=x_grid_t.device)
     x[:, i] = x_grid_t
-    with torch.no_grad():
+    with torch.inference_mode():
         edges = layer.edge_activations(x)   # (N, in, out)
     return edges[:, i, j].cpu().numpy()
 
@@ -139,8 +139,8 @@ def prune_and_extract(
         order = order[:top_k]
     surviving = surviving[order]
 
-    x_grid_t  = torch.linspace(-domain, domain, 100)
-    x_grid_np = x_grid_t.numpy()
+    x_grid_t  = torch.linspace(-domain, domain, 100, device=x_pool.device)
+    x_grid_np = x_grid_t.cpu().numpy()
 
     results = []
     for i, j in surviving:

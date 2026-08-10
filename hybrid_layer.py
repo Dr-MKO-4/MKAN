@@ -59,7 +59,7 @@ class HybridKANLayer(nn.Module):
                 assert all(0 <= i < in_features for i in nt), \
                     f"indices {nt} hors de [0, {in_features})"
         self.node_types  = node_types
-        self._add_mask   = torch.tensor([nt == "add" for nt in node_types])
+        self.register_buffer("_add_mask", torch.tensor([nt == "add" for nt in node_types]))
         self._mult_specs = {j: nt for j, nt in enumerate(node_types) if nt != "add"}
 
         # Grille RBF partagée (buffer non appris)
@@ -196,7 +196,7 @@ class HybridKANLayer(nn.Module):
         if n_new <= 0:
             return self.M
 
-        new_centers  = torch.linspace(xl, xr, n_new + 2)[1:-1]   # exclure les bords
+        new_centers  = torch.linspace(xl, xr, n_new + 2, device=self.centers.device)[1:-1]   # exclure les bords
         old_centers  = self.centers.clone()
         old_w_gauss  = self.w_gauss.data.clone()                  # (in, out, M_old)
 

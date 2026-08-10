@@ -330,7 +330,7 @@ class MKANVisualizer:
         )
 
         dev       = layer.centers.device
-        x_grid    = torch.linspace(-domain, domain, 200).to(dev)
+        x_grid    = torch.linspace(-domain, domain, 200, device=dev)
         x_grid_np = x_grid.cpu().numpy()
 
         for idx, (i, j) in enumerate(top_edges):
@@ -338,7 +338,7 @@ class MKANVisualizer:
             full_y = evaluate_edge_curve(layer, int(i), int(j), x_grid)
 
             # Décomposition interne Gaussienne vs Fourier (section 4.2.2)
-            with torch.no_grad():
+            with torch.inference_mode():
                 batch       = torch.zeros(len(x_grid), layer.in_features, device=dev)
                 batch[:, i] = x_grid
                 diff        = batch.unsqueeze(-1) - layer.centers       # (N, in, M)

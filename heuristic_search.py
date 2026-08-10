@@ -8,7 +8,7 @@ Algorithme génétique amélioré :
   • Composante EDA : modèle probabiliste sur les meilleures solutions (Hao & Solnon, 2024)
   • Taux de mutation décroissant (analogie recuit simulé, Hao & Solnon, 2024)
 
-Stack : PyTorch / Plotly / pandas uniquement. Aucune dépendance sklearn / scipy / optuna / tqdm.
+Stack : PyTorch / Plotly / pandas / tqdm uniquement. Aucune dépendance sklearn / scipy / optuna.
 
 ─── Connexion au workflow train.ipynb ────────────────────────────────────────────
     fitness_fn = build_mkan_fitness(
@@ -45,6 +45,7 @@ import random
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from tqdm.auto import tqdm
 
 
 # ── Espace de recherche par défaut pour MKANScorer ────────────────────────────
@@ -77,10 +78,12 @@ def build_mkan_fitness(
     df_val,
     make_windows,
     device,
-    input_size:         int   = 12,
-    n_epochs:           int   = 10,
-    default_W:          int   = 10,
-    default_batch_size: int   = 256,
+    input_size:          int   = 12,
+    n_epochs:            int   = 10,
+    default_W:           int   = 10,
+    default_batch_size:  int   = 256,
+    max_train_samples:   int   = 30_000,
+    max_val_samples:     int   = 10_000,
 ) -> "callable":
     """
     Fabrique une fonction fitness connectée au workflow MKAN (train.ipynb).
@@ -115,9 +118,16 @@ def build_mkan_fitness(
     from torch.utils.data import DataLoader, TensorDataset
     from MKAN import MKANScorer, mkan_total_loss
 
-    # État partagé : conserve les poids du meilleur modèle vu jusqu'ici.
-    # Accessible après search.fit() via fitness_fn.meilleur['state_dict'].
-    _meilleur = {'score': float('-inf'), 'state_dict': None, 'params': None}
+    # État partagé : meilleur modèle + cache des fenêtres glissantes.
+    # _window_cache évite de rappeler make_windows pour le même W
+    # (gain majeur avec ESPACE_MKAN_DEFAULT où W est fixe : on reconstruit
+    # 240 fois les mêmes tableaux sinon — 20 générations × 12 individus).
+    # _lock protège _meilleur et _window_cache contre les accès concurrents
+    # lorsque _evaluer tourne avec ThreadPoolExecutor (n_workers > 1).
+    import threading
+    _lock         = threading.Lock()
+    _meilleur     = {'score': float('-inf'), 'state_dict': None, 'params': None}
+    _window_cache = {}    # {W: ((X_tr, y_tr), (X_vl, y_vl))}
 
     def fitness_fn(params: dict) -> float:
         hidden_size = int(params.get('hidden_size',  32))
@@ -130,16 +140,57 @@ def build_mkan_fitness(
         mu2         = float(params.get('mu2',   0.5))
         lr          = float(params.get('lr',    1e-3))
 
-        # Reconstruction des fenêtres pour ce W (W peut varier à chaque évaluation)
-        X_tr, y_tr = make_windows(df_train, W)
-        X_vl, y_vl = make_windows(df_val,   W)
+        # Cache des fenêtres avec double-checked locking (thread-safe).
+        # Premier test sans verrou pour éviter la contention sur le cas commun.
+        if W not in _window_cache:
+            with _lock:
+                if W not in _window_cache:   # re-vérifier après acquisition
+                    tqdm.write(f"  Mise en cache des fenêtres W={W} (train + val)…")
+                    try:
+                        # leave=False : supprime les barres Fenêtres dans Jupyter
+                        # pour ne pas casser le layout des barres générations/individus.
+                        xtr, ytr = make_windows(df_train, W, leave=False)
+                        xvl, yvl = make_windows(df_val,   W, leave=False)
+                    except TypeError:
+                        # Compatibilité si make_windows ne supporte pas le paramètre leave
+                        xtr, ytr = make_windows(df_train, W)
+                        xvl, yvl = make_windows(df_val,   W)
+                    _window_cache[W] = ((xtr, ytr), (xvl, yvl))
+                    tqdm.write(
+                        f"  Cache W={W} prêt : {len(xtr):,} fenêtres train  /  {len(xvl):,} val"
+                    )
+        (X_tr, y_tr), (X_vl, y_vl) = _window_cache[W]
 
         if len(X_tr) == 0 or len(X_vl) == 0:
             return -1.0   # W trop grand pour les données disponibles
 
+        # Sous-échantillonnage reproductible pour accélérer le ranking.
+        # Sans cette limite, 1.7M fenêtres × 10 epochs = plusieurs heures par individu.
+        # Graine fixe : même individu évalué deux fois → même score (stabilité EDA).
+        _rng = np.random.default_rng(42)
+        if max_train_samples and len(X_tr) > max_train_samples:
+            _idx = _rng.choice(len(X_tr), max_train_samples, replace=False)
+            _idx.sort()
+            X_tr, y_tr = X_tr[_idx], y_tr[_idx]
+        if max_val_samples and len(X_vl) > max_val_samples:
+            _idx = _rng.choice(len(X_vl), max_val_samples, replace=False)
+            _idx.sort()
+            X_vl, y_vl = X_vl[_idx], y_vl[_idx]
+
         def _loader(X, y, shuffle):
-            ds = TensorDataset(torch.tensor(X), torch.tensor(y))
-            return DataLoader(ds, batch_size=batch_size, shuffle=shuffle)
+            # from_numpy est zero-copy si X/y sont déjà C-contigus float32.
+            # ascontiguousarray garantit la contiguïté ; astype(float32) évite
+            # d'entraîner en float64 (2× plus lent sur CPU).
+            # num_workers=0 : sur Windows/Jupyter, spawn > 0 gèle le kernel ;
+            # avec 86 % RAM, des workers supplémentaires risquent le swap SSD.
+            # pin_memory/non_blocking omis : uniquement utiles avec un GPU CUDA
+            # (Intel Iris Xe n'expose pas de backend CUDA).
+            import numpy as np
+            X_t = torch.from_numpy(np.ascontiguousarray(X, dtype=np.float32))
+            y_t = torch.from_numpy(np.ascontiguousarray(y, dtype=np.float32))
+            ds  = TensorDataset(X_t, y_t)
+            return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
+                              num_workers=0)
 
         tr_loader = _loader(X_tr, y_tr, shuffle=True)
         vl_loader = _loader(X_vl, y_vl, shuffle=False)
@@ -158,7 +209,7 @@ def build_mkan_fitness(
             for X_batch, y_batch in tr_loader:
                 X_batch = X_batch.to(device)
                 y_batch = y_batch.to(device)
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
                 loss, *_ = mkan_total_loss(
                     model, X_batch, y_batch, lam=lam, mu1=mu1, mu2=mu2)
                 loss.backward()
@@ -166,9 +217,10 @@ def build_mkan_fitness(
                 optimizer.step()
 
         # MCC sur val (eq. 3.1)
+        # inference_mode > no_grad : désactive aussi le version tracking des tenseurs.
         model.eval()
         all_scores, all_labels = [], []
-        with torch.no_grad():
+        with torch.inference_mode():
             for X_batch, y_batch in vl_loader:
                 all_scores.append(model(X_batch.to(device)).cpu().numpy())
                 all_labels.append(y_batch.numpy())
@@ -186,13 +238,23 @@ def build_mkan_fitness(
         den = math.sqrt(float((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)))
         mcc = float(num / (den + 1e-12))
 
-        # Sauvegarde des poids si ce modèle est le meilleur vu jusqu'ici
-        if mcc > _meilleur['score']:
-            _meilleur['score']      = mcc
-            _meilleur['params']     = dict(params)
-            _meilleur['state_dict'] = {
-                k: v.cpu().clone() for k, v in model.state_dict().items()
-            }
+        # Sauvegarde des poids si ce modèle est le meilleur vu jusqu'ici.
+        # Verrou requis : plusieurs threads peuvent tester la condition simultanément.
+        with _lock:
+            if mcc > _meilleur['score']:
+                _meilleur['score']      = mcc
+                _meilleur['params']     = dict(params)
+                _meilleur['state_dict'] = {
+                    k: v.cpu().clone() for k, v in model.state_dict().items()
+                }
+
+        # Libération explicite des buffers PyTorch.
+        # Le GC Python ne garantit pas la libération immédiate sur CPU :
+        # avec 86 % de RAM occupée, accumuler 12 modèles par génération
+        # sans del peut provoquer un OOM ou un fort swapping SSD.
+        import gc
+        del model, optimizer
+        gc.collect()
 
         return mcc
 
@@ -255,6 +317,7 @@ class RechercheHeuristique:
         min_diversite:      float = 0.40,
         patience:           int   = 5,
         maximize:           bool  = True,
+        n_workers:          int   = 1,
     ) -> None:
         self._valider(espace, elite_size, taille_population, tournament_size, mutation_rate)
 
@@ -270,6 +333,7 @@ class RechercheHeuristique:
         self.min_diversite      = min_diversite
         self.patience           = patience
         self.maximize           = maximize
+        self.n_workers          = max(1, n_workers)
 
         # État interne — réinitialisé à chaque appel à fit()
         self._population:             list  = []
@@ -315,15 +379,55 @@ class RechercheHeuristique:
     # ── Évaluation ───────────────────────────────────────────────────────────
 
     def _evaluer(self) -> None:
-        """Appelle fitness_fn uniquement pour les individus non encore évalués."""
-        for i, ind in enumerate(self._population):
-            if self._scores[i] is None:
+        """
+        Évalue les individus non encore scorés.
+
+        Si n_workers > 1 : évaluation parallèle via ThreadPoolExecutor.
+        PyTorch libère le GIL pendant les opérations tenseur — plusieurs
+        évaluations (modèles distincts, poids distincts) peuvent donc
+        s'exécuter réellement en parallèle sur le CPU ou un GPU partagé.
+        fitness_fn doit être thread-safe (build_mkan_fitness l'est : ses
+        états partagés sont protégés par _lock).
+
+        position=1 fixe la barre individus sous la barre générations (position=0)
+        pour éviter les chevauchements dans Jupyter.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        a_evaluer = [(i, ind) for i, ind in enumerate(self._population)
+                     if self._scores[i] is None]
+
+        if not a_evaluer:
+            return
+
+        if self.n_workers == 1:
+            # Chemin séquentiel — aucune surcharge de threading
+            pbar_ind = tqdm(a_evaluer, desc="  ├─ individus", leave=False,
+                            unit="ind", position=1)
+            for i, ind in pbar_ind:
                 score = self.fitness_fn(ind)
                 if not isinstance(score, (int, float)):
                     raise TypeError(
                         f"fitness_fn doit retourner un float scalaire, reçu : {type(score)}"
                     )
                 self._scores[i] = float(score)
+                pbar_ind.set_postfix({"MCC": f"{score:.4f}"})
+        else:
+            # Chemin parallèle
+            with ThreadPoolExecutor(max_workers=self.n_workers) as pool:
+                futures = {pool.submit(self.fitness_fn, ind): i for i, ind in a_evaluer}
+                pbar_ind = tqdm(as_completed(futures), total=len(futures),
+                                desc="  ├─ individus", leave=False,
+                                unit="ind", position=1)
+                for fut in pbar_ind:
+                    i     = futures[fut]
+                    score = fut.result()
+                    if not isinstance(score, (int, float)):
+                        raise TypeError(
+                            f"fitness_fn doit retourner un float scalaire, reçu : {type(score)}"
+                        )
+                    self._scores[i] = float(score)
+                    pbar_ind.set_postfix({"MCC": f"{score:.4f}"})
 
     # ── Diversité (Hao & Solnon §4.3) ────────────────────────────────────────
 
@@ -511,7 +615,9 @@ class RechercheHeuristique:
         self._initialiser()
         sans_amelioration = 0
 
-        for gen in range(self.n_generations):
+        pbar = tqdm(range(self.n_generations), desc="Générations", unit="gén",
+                    position=0, leave=True)
+        for gen in pbar:
 
             # 1. Évaluation
             self._evaluer()
@@ -528,14 +634,13 @@ class RechercheHeuristique:
             # 5. Rapport
             scores_valides = [s for s in self._scores if s is not None]
             moy = sum(scores_valides) / len(scores_valides)
-            print(
-                f"[Gén {gen + 1:>3}/{self.n_generations}] "
-                f"Meilleur={self._best_score:.4f}  "
-                f"Moyen={moy:.4f}  "
-                f"Div={diversite:.2f}  "
-                f"μ={self._mutation_rate_courant:.3f}  "
-                f"{'↑' if ameliore else ''}"
-            )
+            pbar.set_postfix({
+                "best": f"{self._best_score:.4f}",
+                "moy":  f"{moy:.4f}",
+                "div":  f"{diversite:.2f}",
+                "μ":    f"{self._mutation_rate_courant:.3f}",
+                "↑" if ameliore else "=": "",
+            })
 
             # Arrêt anticipé
             if ameliore:
@@ -543,7 +648,7 @@ class RechercheHeuristique:
             else:
                 sans_amelioration += 1
             if sans_amelioration >= self.patience:
-                print(f"  → Arrêt anticipé : {self.patience} générations sans amélioration.")
+                tqdm.write(f"  → Arrêt anticipé : {self.patience} générations sans amélioration.")
                 break
 
             # 6. Injection de diversité si nécessaire (Hao & Solnon §4.3)
