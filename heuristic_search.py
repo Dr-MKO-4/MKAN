@@ -21,7 +21,7 @@ Stack : PyTorch / Plotly / pandas / tqdm uniquement. Aucune dépendance sklearn 
     )
 
     search = RechercheHeuristique(
-        espace            = ESPACE_MKAN_DEFAULT,  # inclut W et batch_size
+        espace            = ESPACE_MKAN_DEFAULT,
         fitness_fn        = fitness_fn,
         n_generations     = 20,
         taille_population = 12,
@@ -37,14 +37,22 @@ Stack : PyTorch / Plotly / pandas / tqdm uniquement. Aucune dépendance sklearn 
     search.plot_convergence().show()
     search.plot_parameter_space().show()
     search.plot_diversity().show()
+
+─── Récupération du meilleur modèle après fit() ──────────────────────────────────
+    meilleur = fitness_fn.get_meilleur()   # thread-safe : lecture sous verrou
+    model.load_state_dict(meilleur['state_dict'])
 ─────────────────────────────────────────────────────────────────────────────────
 """
 
 import math
 import random
+import threading
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+# tqdm.auto sélectionne automatiquement tqdm.notebook dans Jupyter
+# et tqdm.tqdm en terminal — aucune modification requise selon l'environnement.
 from tqdm.auto import tqdm
 
 
@@ -78,12 +86,12 @@ def build_mkan_fitness(
     df_val,
     make_windows,
     device,
-    input_size:          int   = 12,
-    n_epochs:            int   = 10,
-    default_W:           int   = 10,
-    default_batch_size:  int   = 256,
-    max_train_samples:   int   = 30_000,
-    max_val_samples:     int   = 10_000,
+    input_size:         int = 12,
+    n_epochs:           int = 10,
+    default_W:          int = 10,
+    default_batch_size: int = 256,
+    max_train_samples:  int = 30_000,
+    max_val_samples:    int = 10_000,
 ) -> "callable":
     """
     Fabrique une fonction fitness connectée au workflow MKAN (train.ipynb).
@@ -93,41 +101,55 @@ def build_mkan_fitness(
     pour chaque combinaison (W, batch_size) testée par la recherche.
 
     Chaque appel à la fonction retournée :
-      1. Reconstruit les fenêtres train/val avec la valeur W du paramètre.
+      1. Reconstruit les fenêtres train/val avec la valeur W du paramètre
+         (résultat mis en cache par W pour éviter les reconstructions inutiles).
       2. Instancie MKANScorer avec les hyperparamètres proposés.
       3. Entraîne le modèle pendant n_epochs avec le batch_size proposé.
       4. Calcule le MCC sur val (métrique principale, eq. 3.1).
       5. Retourne ce MCC comme score de fitness.
 
+    Thread-safety (n_workers > 1) :
+      • _lock protège _meilleur ET _window_cache en écriture ET en lecture.
+      • get_meilleur() expose _meilleur via une copie réalisée sous verrou —
+        aucune lecture hors verrou du dict partagé n'est possible.
+      • Double-checked locking sur _window_cache : le test hors verrou est
+        conservé pour les performances, mais la lecture effective des données
+        se fait toujours après acquisition du verrou (CPython GIL + cohérence
+        logique garantie par le double test).
+
     Args:
-        df_train       : DataFrame pandas normalisé (split train).
-        df_val         : DataFrame pandas normalisé (split val).
-        make_windows   : callable(df, W) -> (X_np, y_np) — défini dans train.ipynb.
-        device         : torch.device ('cpu' ou 'cuda').
-        input_size     : nombre de features d'entrée (12 dans le pipeline).
-        n_epochs       : epochs d'entraînement rapide pour le ranking.
-        default_W      : fenêtre par défaut si 'W' absent du dict params.
+        df_train           : DataFrame pandas normalisé (split train).
+        df_val             : DataFrame pandas normalisé (split val).
+        make_windows       : callable(df, W) -> (X_np, y_np) — défini dans train.ipynb.
+        device             : torch.device ('cpu' ou 'cuda').
+        input_size         : nombre de features d'entrée (12 dans le pipeline).
+        n_epochs           : epochs d'entraînement rapide pour le ranking.
+        default_W          : fenêtre par défaut si 'W' absent du dict params.
         default_batch_size : batch_size par défaut si absent du dict params.
+        max_train_samples  : sous-échantillonnage train (0 = désactivé).
+        max_val_samples    : sous-échantillonnage val   (0 = désactivé).
 
     Returns:
         fitness_fn(params: dict) -> float  (MCC ∈ [-1, 1]).
         params peut contenir : hidden_size, M, K, W, batch_size, lam, mu1, mu2, lr.
+
+    Attributs exposés sur fitness_fn :
+        fitness_fn.get_meilleur() -> dict  — copie thread-safe de
+            {'score': float, 'params': dict, 'state_dict': dict}.
     """
     import torch
     import numpy as np
     from torch.utils.data import DataLoader, TensorDataset
     from MKAN import MKANScorer, mkan_total_loss
 
-    # État partagé : meilleur modèle + cache des fenêtres glissantes.
-    # _window_cache évite de rappeler make_windows pour le même W
-    # (gain majeur avec ESPACE_MKAN_DEFAULT où W est fixe : on reconstruit
-    # 240 fois les mêmes tableaux sinon — 20 générations × 12 individus).
-    # _lock protège _meilleur et _window_cache contre les accès concurrents
-    # lorsque _evaluer tourne avec ThreadPoolExecutor (n_workers > 1).
-    import threading
+    # ── État partagé ──────────────────────────────────────────────────────────
+    # _lock  : protège _meilleur et _window_cache contre les accès concurrents.
+    # _meilleur      : {'score', 'params', 'state_dict'} — mis à jour sous _lock.
+    # _window_cache  : {W: ((X_tr, y_tr), (X_vl, y_vl))} — écrit sous _lock,
+    #                  lu sous _lock (voir fitness_fn ci-dessous).
     _lock         = threading.Lock()
     _meilleur     = {'score': float('-inf'), 'state_dict': None, 'params': None}
-    _window_cache = {}    # {W: ((X_tr, y_tr), (X_vl, y_vl))}
+    _window_cache = {}
 
     def fitness_fn(params: dict) -> float:
         hidden_size = int(params.get('hidden_size',  32))
@@ -140,33 +162,47 @@ def build_mkan_fitness(
         mu2         = float(params.get('mu2',   0.5))
         lr          = float(params.get('lr',    1e-3))
 
-        # Cache des fenêtres avec double-checked locking (thread-safe).
-        # Premier test sans verrou pour éviter la contention sur le cas commun.
+        # ── Cache des fenêtres glissantes ──────────────────────────────────────
+        # Pattern : double-checked locking.
+        #   • Premier test hors verrou  → évite la contention sur le cas commun
+        #     (W déjà en cache) ; sous CPython le GIL garantit l'atomicité de
+        #     __contains__ sur dict, donc pas de fausse lecture.
+        #   • Second test sous verrou   → garantit qu'un seul thread reconstruit
+        #     les fenêtres si plusieurs arrivent simultanément sur un W absent.
+        #   • Lecture des données       → réalisée SOUS verrou (bloc with _lock
+        #     ci-dessous) pour éviter une race entre la lecture de _window_cache[W]
+        #     et une éventuelle écriture concurrente sur le même W.
+        #     Coût négligeable : la lecture du cache est une simple affectation
+        #     de références numpy, pas une copie des tableaux.
         if W not in _window_cache:
             with _lock:
-                if W not in _window_cache:   # re-vérifier après acquisition
+                if W not in _window_cache:
                     tqdm.write(f"  Mise en cache des fenêtres W={W} (train + val)…")
                     try:
-                        # leave=False : supprime les barres Fenêtres dans Jupyter
-                        # pour ne pas casser le layout des barres générations/individus.
                         xtr, ytr = make_windows(df_train, W, leave=False)
                         xvl, yvl = make_windows(df_val,   W, leave=False)
                     except TypeError:
-                        # Compatibilité si make_windows ne supporte pas le paramètre leave
+                        # Compatibilité si make_windows ne supporte pas leave=
                         xtr, ytr = make_windows(df_train, W)
                         xvl, yvl = make_windows(df_val,   W)
                     _window_cache[W] = ((xtr, ytr), (xvl, yvl))
                     tqdm.write(
                         f"  Cache W={W} prêt : {len(xtr):,} fenêtres train  /  {len(xvl):,} val"
                     )
-        (X_tr, y_tr), (X_vl, y_vl) = _window_cache[W]
+
+        # Lecture sous verrou : élimine la race entre lecture et écriture
+        # sur _window_cache[W] dans le cas où deux threads traitent le même W
+        # simultanément (peu probable avec ESPACE_MKAN_DEFAULT, mais correct
+        # avec ESPACE_MKAN_ETENDU où W varie).
+        with _lock:
+            (X_tr, y_tr), (X_vl, y_vl) = _window_cache[W]
 
         if len(X_tr) == 0 or len(X_vl) == 0:
             return -1.0   # W trop grand pour les données disponibles
 
-        # Sous-échantillonnage reproductible pour accélérer le ranking.
-        # Sans cette limite, 1.7M fenêtres × 10 epochs = plusieurs heures par individu.
+        # ── Sous-échantillonnage reproductible ────────────────────────────────
         # Graine fixe : même individu évalué deux fois → même score (stabilité EDA).
+        # Sans cette limite, 1.7M fenêtres × 10 epochs = plusieurs heures par individu.
         _rng = np.random.default_rng(42)
         if max_train_samples and len(X_tr) > max_train_samples:
             _idx = _rng.choice(len(X_tr), max_train_samples, replace=False)
@@ -179,13 +215,10 @@ def build_mkan_fitness(
 
         def _loader(X, y, shuffle):
             # from_numpy est zero-copy si X/y sont déjà C-contigus float32.
-            # ascontiguousarray garantit la contiguïté ; astype(float32) évite
+            # ascontiguousarray garantit la contiguïté ; dtype float32 évite
             # d'entraîner en float64 (2× plus lent sur CPU).
             # num_workers=0 : sur Windows/Jupyter, spawn > 0 gèle le kernel ;
             # avec 86 % RAM, des workers supplémentaires risquent le swap SSD.
-            # pin_memory/non_blocking omis : uniquement utiles avec un GPU CUDA
-            # (Intel Iris Xe n'expose pas de backend CUDA).
-            import numpy as np
             X_t = torch.from_numpy(np.ascontiguousarray(X, dtype=np.float32))
             y_t = torch.from_numpy(np.ascontiguousarray(y, dtype=np.float32))
             ds  = TensorDataset(X_t, y_t)
@@ -204,6 +237,7 @@ def build_mkan_fitness(
 
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
+        # ── Entraînement ──────────────────────────────────────────────────────
         model.train()
         for _ in range(n_epochs):
             for X_batch, y_batch in tr_loader:
@@ -216,11 +250,10 @@ def build_mkan_fitness(
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
-        # MCC sur val (eq. 3.1)
-        # inference_mode > no_grad : désactive aussi le version tracking des tenseurs.
+        # ── Évaluation MCC sur val (eq. 3.1) ──────────────────────────────────
         model.eval()
         all_scores, all_labels = [], []
-        with torch.inference_mode():
+        with torch.no_grad():
             for X_batch, y_batch in vl_loader:
                 all_scores.append(model(X_batch.to(device)).cpu().numpy())
                 all_labels.append(y_batch.numpy())
@@ -238,8 +271,9 @@ def build_mkan_fitness(
         den = math.sqrt(float((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)))
         mcc = float(num / (den + 1e-12))
 
-        # Sauvegarde des poids si ce modèle est le meilleur vu jusqu'ici.
-        # Verrou requis : plusieurs threads peuvent tester la condition simultanément.
+        # ── Sauvegarde du meilleur modèle ──────────────────────────────────────
+        # Toute la section critique est sous verrou : test + mise à jour atomiques.
+        # Empêche deux threads d'écrire simultanément des state_dict partiels.
         with _lock:
             if mcc > _meilleur['score']:
                 _meilleur['score']      = mcc
@@ -248,7 +282,7 @@ def build_mkan_fitness(
                     k: v.cpu().clone() for k, v in model.state_dict().items()
                 }
 
-        # Libération explicite des buffers PyTorch.
+        # ── Libération explicite des buffers PyTorch ───────────────────────────
         # Le GC Python ne garantit pas la libération immédiate sur CPU :
         # avec 86 % de RAM occupée, accumuler 12 modèles par génération
         # sans del peut provoquer un OOM ou un fort swapping SSD.
@@ -258,8 +292,32 @@ def build_mkan_fitness(
 
         return mcc
 
-    # Exposé pour récupérer les poids après search.fit()
-    fitness_fn.meilleur = _meilleur
+    def get_meilleur() -> dict:
+        """
+        Retourne une copie thread-safe de l'état du meilleur modèle trouvé.
+
+        Réalise la lecture de _meilleur SOUS _lock pour éliminer la data race
+        entre un thread qui lirait _meilleur['state_dict'] et un autre thread
+        qui serait en train de l'écrire dans fitness_fn.
+
+        Returns:
+            dict avec clés 'score' (float), 'params' (dict), 'state_dict' (dict).
+            state_dict est une copie superficielle (les tenseurs sont déjà clonés
+            lors de la sauvegarde — pas besoin de re-cloner ici).
+
+        Usage :
+            meilleur = fitness_fn.get_meilleur()
+            model.load_state_dict(meilleur['state_dict'])
+        """
+        with _lock:
+            return {
+                'score':      _meilleur['score'],
+                'params':     dict(_meilleur['params']) if _meilleur['params'] else None,
+                'state_dict': dict(_meilleur['state_dict']) if _meilleur['state_dict'] else None,
+            }
+
+    # Exposition sur la fonction pour accès depuis le notebook après search.fit()
+    fitness_fn.get_meilleur = get_meilleur
     return fitness_fn
 
 
@@ -284,6 +342,12 @@ class RechercheHeuristique:
        est généré par tirage selon ce modèle, guidant vers les régions prometteuses
        (Hao & Solnon §5).
 
+    Thread-safety :
+        RechercheHeuristique elle-même n'est pas thread-safe : fit() modifie
+        _population, _scores, _journal et ne doit pas être appelé en parallèle.
+        L'évaluation parallèle des individus (n_workers > 1) est thread-safe
+        via ThreadPoolExecutor + le _lock interne de build_mkan_fitness.
+
     Args:
         espace             : {str: list} — espace de recherche discret.
                              Utiliser `ESPACE_MKAN_DEFAULT` pour MKANScorer.
@@ -301,6 +365,7 @@ class RechercheHeuristique:
                              En dessous : injection d'individus aléatoires.
         patience           : arrêt anticipé si aucune amélioration sur N générations.
         maximize           : True → maximise (MCC, AUC) / False → minimise (loss).
+        n_workers          : threads parallèles pour _evaluer (1 = séquentiel).
     """
 
     def __init__(
@@ -380,17 +445,21 @@ class RechercheHeuristique:
 
     def _evaluer(self) -> None:
         """
-        Évalue les individus non encore scorés.
+        Évalue les individus non encore scorés (self._scores[i] is None).
 
-        Si n_workers > 1 : évaluation parallèle via ThreadPoolExecutor.
-        PyTorch libère le GIL pendant les opérations tenseur — plusieurs
-        évaluations (modèles distincts, poids distincts) peuvent donc
-        s'exécuter réellement en parallèle sur le CPU ou un GPU partagé.
-        fitness_fn doit être thread-safe (build_mkan_fitness l'est : ses
-        états partagés sont protégés par _lock).
+        Séquentiel (n_workers=1) :
+            Chemin direct sans surcharge de threading. Barre tqdm avec leave=False
+            pour ne pas polluer la sortie Jupyter — le print explicite dans fit()
+            assure la lisibilité persistante par génération.
 
-        position=1 fixe la barre individus sous la barre générations (position=0)
-        pour éviter les chevauchements dans Jupyter.
+        Parallèle (n_workers > 1) :
+            ThreadPoolExecutor : PyTorch libère le GIL pendant les opérations
+            tenseur, donc plusieurs évaluations (modèles distincts) s'exécutent
+            réellement en parallèle sur CPU ou GPU partagé.
+            Les scores sont écrits dans self._scores[i] depuis le thread principal
+            via as_completed — pas de race sur self._scores.
+            fit() ne reconstruit self._scores qu'après pool.__exit__(), qui attend
+            la fin de tous les futures — pas de race entre reconstruction et écriture.
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -401,9 +470,8 @@ class RechercheHeuristique:
             return
 
         if self.n_workers == 1:
-            # Chemin séquentiel — aucune surcharge de threading
-            pbar_ind = tqdm(a_evaluer, desc="  ├─ individus", leave=False,
-                            unit="ind", position=1)
+            pbar_ind = tqdm(a_evaluer, desc="  ├─ individus",
+                            leave=False, unit="ind")
             for i, ind in pbar_ind:
                 score = self.fitness_fn(ind)
                 if not isinstance(score, (int, float)):
@@ -413,12 +481,10 @@ class RechercheHeuristique:
                 self._scores[i] = float(score)
                 pbar_ind.set_postfix({"MCC": f"{score:.4f}"})
         else:
-            # Chemin parallèle
             with ThreadPoolExecutor(max_workers=self.n_workers) as pool:
                 futures = {pool.submit(self.fitness_fn, ind): i for i, ind in a_evaluer}
                 pbar_ind = tqdm(as_completed(futures), total=len(futures),
-                                desc="  ├─ individus", leave=False,
-                                unit="ind", position=1)
+                                desc="  ├─ individus", leave=False, unit="ind")
                 for fut in pbar_ind:
                     i     = futures[fut]
                     score = fut.result()
@@ -437,10 +503,13 @@ class RechercheHeuristique:
         return uniques / len(self._population)
 
     def _injecter_diversite(self, n_inject: int) -> None:
-        """Remplace les n_inject pires non-élites par des individus aléatoires."""
+        """
+        Remplace les n_inject pires non-élites par des individus aléatoires.
+        Les élites (premières positions dans _indices_tries) ne sont jamais touchées.
+        Les individus injectés ont leur score mis à None pour forcer la réévaluation.
+        """
         idx_tries = self._indices_tries()
-        # Les élites occupent les premières positions — on touche uniquement les dernières
-        pires = idx_tries[-n_inject:]
+        pires     = idx_tries[-n_inject:]
         for i in pires:
             self._population[i] = self._individu_aleatoire()
             self._scores[i]     = None
@@ -450,17 +519,18 @@ class RechercheHeuristique:
     def _eda_frequences(self, n_best: int) -> dict:
         """
         Fréquences empiriques des valeurs parmi les n_best meilleurs individus.
-        Lissage de Laplace : évite les probabilités nulles (prior uniforme de 1).
+        Lissage de Laplace (prior uniforme de 1) : évite les probabilités nulles
+        pour les valeurs non représentées parmi les meilleurs.
         Retourne {param: {valeur: probabilité}}.
         """
         idx       = self._indices_tries()[:n_best]
         meilleurs = [self._population[i] for i in idx]
-        freq = {}
+        freq      = {}
         for k, valeurs in self.espace.items():
-            counts = {v: 1 for v in valeurs}   # lissage de Laplace
+            counts = {v: 1 for v in valeurs}
             for ind in meilleurs:
                 counts[ind[k]] = counts.get(ind[k], 1) + 1
-            total  = sum(counts.values())
+            total   = sum(counts.values())
             freq[k] = {v: counts[v] / total for v in valeurs}
         return freq
 
@@ -483,14 +553,18 @@ class RechercheHeuristique:
         )
 
     def _elites(self) -> tuple:
-        """Retourne les elite_size meilleurs (individus, scores)."""
+        """Retourne les elite_size meilleurs individus avec leurs scores (copies)."""
         idx       = self._indices_tries()[:self.elite_size]
         individus = [dict(self._population[i]) for i in idx]
         scores    = [self._scores[i]           for i in idx]
         return individus, scores
 
     def _roulette(self, n: int) -> list:
-        """Sélection proportionnelle — décalage par min pour gérer les scores négatifs."""
+        """
+        Sélection proportionnelle au score.
+        Décalage par le minimum pour gérer les scores négatifs (MCC ∈ [-1, 1]) :
+        tous les poids sont positifs après décalage.
+        """
         s_min = min(self._scores)
         poids = [s - s_min + 1e-9 for s in self._scores]
         total = sum(poids)
@@ -518,7 +592,7 @@ class RechercheHeuristique:
     # ── Croisement ───────────────────────────────────────────────────────────
 
     def _croiser(self, parent1: dict, parent2: dict) -> tuple:
-        """Croisement à un point sur les clés de paramètres."""
+        """Croisement à un point sur les clés de paramètres (ordre stable : dict Python 3.7+)."""
         keys = list(parent1.keys())
         if len(keys) < 2:
             return dict(parent1), dict(parent2)
@@ -531,8 +605,9 @@ class RechercheHeuristique:
 
     def _muter(self, individu: dict) -> dict:
         """
-        Mutation par remplacement dans l'espace discret.
-        Utilise _mutation_rate_courant (décroit avec le refroidissement à chaque génération).
+        Mutation par remplacement aléatoire dans l'espace discret.
+        Probabilité de mutation par paramètre = _mutation_rate_courant,
+        qui décroît avec le refroidissement à chaque génération.
         """
         mutant = dict(individu)
         for k, valeurs in self.espace.items():
@@ -545,7 +620,11 @@ class RechercheHeuristique:
     def _generer_enfants(self, parents: list, freq: dict = None) -> list:
         """
         Génère exactement (taille_pop - elite_size) enfants.
-        Si freq fourni (modèle EDA) : 1/3 EDA, 2/3 croisement+mutation (Hao & Solnon §5).
+
+        Répartition si freq fourni (modèle EDA actif, Hao & Solnon §5) :
+          • 2/3 par croisement à un point + mutation (exploration locale).
+          • 1/3 par tirage selon le modèle EDA (guidage vers les régions prometteuses).
+        Sans freq : 100 % croisement + mutation.
         """
         n_enfants = self.taille_pop - self.elite_size
         n_eda     = (n_enfants // 3) if freq is not None else 0
@@ -569,7 +648,10 @@ class RechercheHeuristique:
     # ── Tracking ─────────────────────────────────────────────────────────────
 
     def _mettre_a_jour_best(self) -> bool:
-        """Actualise _best_params/_best_score. Retourne True si amélioré."""
+        """
+        Actualise _best_params et _best_score si la génération courante a amélioré
+        le meilleur global. Retourne True si une amélioration a eu lieu.
+        """
         meilleur_score = (max if self.maximize else min)(self._scores)
         ameliore = (
             meilleur_score > self._best_score if self.maximize
@@ -582,6 +664,7 @@ class RechercheHeuristique:
         return ameliore
 
     def _enregistrer_generation(self, generation: int, diversite: float, mutation_rate: float) -> None:
+        """Enregistre un enregistrement par individu dans le journal (→ .history)."""
         for ind, score in zip(self._population, self._scores):
             record = {
                 'generation':    generation,
@@ -603,20 +686,23 @@ class RechercheHeuristique:
           2. Mise à jour du meilleur global.
           3. Calcul de la diversité (fraction d'individus uniques).
           4. Enregistrement dans le journal (→ .history).
-          5. Rapport console + arrêt anticipé (patience).
-          6. Injection aléatoire si diversité < min_diversite (Hao & Solnon §4.3).
-          7. Refroidissement du taux de mutation (analogie recuit simulé).
-          8. Modèle EDA sur les 2×elite_size meilleurs individus (Hao & Solnon §5).
-          9. Nouvelle génération : élites + enfants (croisement/mutation + EDA).
+          5. Rapport : print explicite (persistant dans Jupyter) + postfix tqdm.
+          6. Arrêt anticipé si patience générations sans amélioration.
+          7. Injection aléatoire si diversité < min_diversite (Hao & Solnon §4.3).
+          8. Refroidissement du taux de mutation (analogie recuit simulé).
+          9. Modèle EDA sur les 2×elite_size meilleurs individus (Hao & Solnon §5).
+         10. Nouvelle génération : élites préservées + enfants (croisement/mutation + EDA).
 
         Returns:
-            dict: 'params' → meilleur jeu d'hyperparamètres, 'score' → meilleur score.
+            dict: 'params' → meilleur jeu d'hyperparamètres, 'score' → meilleur MCC val.
         """
         self._initialiser()
         sans_amelioration = 0
 
-        pbar = tqdm(range(self.n_generations), desc="Générations", unit="gén",
-                    position=0, leave=True)
+        # position= omis : dans Jupyter, position= numérotée provoque des
+        # chevauchements de barres. leave=True : la barre reste visible après fit().
+        pbar = tqdm(range(self.n_generations), desc="Générations", unit="gén", leave=True)
+
         for gen in pbar:
 
             # 1. Évaluation
@@ -631,18 +717,26 @@ class RechercheHeuristique:
             # 4. Enregistrement
             self._enregistrer_generation(gen, diversite, self._mutation_rate_courant)
 
-            # 5. Rapport
+            # 5. Rapport — print explicite prioritaire sur set_postfix dans Jupyter.
+            # set_postfix reste utile en terminal où print() et tqdm coexistent mal.
             scores_valides = [s for s in self._scores if s is not None]
             moy = sum(scores_valides) / len(scores_valides)
+            print(
+                f"Gén {gen + 1:02d}/{self.n_generations} | "
+                f"best={self._best_score:.4f} | "
+                f"moy={moy:.4f} | "
+                f"div={diversite:.2f} | "
+                f"μ={self._mutation_rate_courant:.3f} | "
+                f"{'↑ AMÉLIORATION' if ameliore else '='}"
+            )
             pbar.set_postfix({
                 "best": f"{self._best_score:.4f}",
                 "moy":  f"{moy:.4f}",
                 "div":  f"{diversite:.2f}",
                 "μ":    f"{self._mutation_rate_courant:.3f}",
-                "↑" if ameliore else "=": "",
             })
 
-            # Arrêt anticipé
+            # 6. Arrêt anticipé
             if ameliore:
                 sans_amelioration = 0
             else:
@@ -651,25 +745,27 @@ class RechercheHeuristique:
                 tqdm.write(f"  → Arrêt anticipé : {self.patience} générations sans amélioration.")
                 break
 
-            # 6. Injection de diversité si nécessaire (Hao & Solnon §4.3)
+            # 7. Injection de diversité (Hao & Solnon §4.3)
             if diversite < self.min_diversite:
                 n_inject = max(1, self.taille_pop // 4)
                 self._injecter_diversite(n_inject)
 
-            # 7. Refroidissement du taux de mutation
+            # 8. Refroidissement du taux de mutation
             self._mutation_rate_courant = max(
                 self.min_mutation_rate,
                 self._mutation_rate_courant * self.refroidissement,
             )
 
-            # 8. Modèle EDA sur les meilleurs individus (Hao & Solnon §5)
+            # 9. Modèle EDA sur les meilleurs individus (Hao & Solnon §5)
             n_eda_best = min(max(2, self.elite_size * 2), len(self._population))
             freq       = self._eda_frequences(n_eda_best)
 
-            # 9. Nouvelle génération
-            e_ind, e_scores = self._elites()
-            parents         = self._selectionner_parents()
-            enfants         = self._generer_enfants(parents, freq=freq)
+            # 10. Nouvelle génération
+            # Note : pool.__exit__() dans _evaluer() garantit que tous les threads
+            # ont terminé avant d'arriver ici — pas de race sur _scores.
+            e_ind, e_scores  = self._elites()
+            parents          = self._selectionner_parents()
+            enfants          = self._generer_enfants(parents, freq=freq)
 
             self._population = e_ind + enfants
             self._scores     = e_scores + [None] * len(enfants)
@@ -682,7 +778,8 @@ class RechercheHeuristique:
     def history(self) -> pd.DataFrame:
         """
         Historique complet de l'optimisation sous forme de DataFrame.
-        Colonnes : generation | score | diversite | mutation_rate | <param_1> | ...
+        Colonnes : generation | score | diversite | mutation_rate | <param_1> | …
+        Appeler fit() avant d'accéder à cette propriété.
         """
         if not self._journal:
             raise RuntimeError("Appeler fit() avant d'accéder à .history.")
@@ -690,7 +787,7 @@ class RechercheHeuristique:
 
     @property
     def best(self) -> dict:
-        """Meilleur jeu de paramètres trouvé avec son score."""
+        """Meilleur jeu de paramètres trouvé avec son score de fitness."""
         return {'params': dict(self._best_params), 'score': self._best_score}
 
     # ── Visualisations Plotly ─────────────────────────────────────────────────
@@ -713,7 +810,6 @@ class RechercheHeuristique:
         y_lower = [m - s for m, s in zip(y_mean, y_std)]
 
         fig = go.Figure()
-
         fig.add_trace(go.Scatter(
             x=x + list(reversed(x)),
             y=y_upper + list(reversed(y_lower)),
@@ -760,7 +856,6 @@ class RechercheHeuristique:
             subplot_titles=params,
             vertical_spacing=0.12,
         )
-
         for idx, param in enumerate(params):
             r, c = divmod(idx, cols)
             for val in sorted(df[param].unique(), key=str):
@@ -828,8 +923,6 @@ class RechercheHeuristique:
             subplot_titles=['Diversité de la population', 'Taux de mutation (refroidissement)'],
             vertical_spacing=0.18,
         )
-
-        # Diversité
         fig.add_trace(go.Scatter(
             x=x, y=stats['diversite'].tolist(),
             mode='lines+markers',
@@ -844,8 +937,6 @@ class RechercheHeuristique:
             annotation_position='top right',
             row=1, col=1,
         )
-
-        # Taux de mutation
         fig.add_trace(go.Scatter(
             x=x, y=stats['mutation_rate'].tolist(),
             mode='lines+markers',
@@ -860,7 +951,6 @@ class RechercheHeuristique:
             annotation_position='bottom right',
             row=2, col=1,
         )
-
         fig.update_yaxes(range=[0.0, 1.05], row=1, col=1)
         max_mut = max(stats['mutation_rate'].tolist(), default=1.0)
         fig.update_yaxes(range=[0.0, max_mut * 1.15 + 0.01], row=2, col=1)
@@ -889,8 +979,10 @@ if __name__ == '__main__':
     """
     Fitness analytique pour tester sans données MoMTSim.
     Pour le vrai usage MKAN :
-        fitness_fn = build_mkan_fitness(train_loader, val_loader, DEVICE, INPUT_SIZE, n_epochs=10)
+        fitness_fn = build_mkan_fitness(df_train, df_val, make_windows, DEVICE, INPUT_SIZE, n_epochs=10)
         search = RechercheHeuristique(ESPACE_MKAN_DEFAULT, fitness_fn, maximize=True)
+        best   = search.fit()
+        meilleur = fitness_fn.get_meilleur()   # thread-safe
     """
 
     def fitness_demo(params: dict) -> float:
@@ -906,16 +998,16 @@ if __name__ == '__main__':
             'M':           [4, 8, 16, 32],
             'K':           [1, 2, 4],
         },
-        fitness_fn       = fitness_demo,
-        n_generations    = 15,
-        taille_population= 12,
-        elite_size       = 2,
-        tournament_size  = 3,
-        mutation_rate    = 0.35,
-        refroidissement  = 0.95,
-        min_diversite    = 0.40,
-        patience         = 5,
-        maximize         = True,
+        fitness_fn        = fitness_demo,
+        n_generations     = 15,
+        taille_population = 12,
+        elite_size        = 2,
+        tournament_size   = 3,
+        mutation_rate     = 0.35,
+        refroidissement   = 0.95,
+        min_diversite     = 0.40,
+        patience          = 5,
+        maximize          = True,
     )
 
     best = search.fit()

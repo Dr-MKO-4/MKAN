@@ -89,6 +89,37 @@ class TKANCell(nn.Module):
         h_t = o_t * torch.tanh(c_t)          # eq. 4.12
         return h_t, c_t
 
+    def forward_with_reg(self, x_t: torch.Tensor,
+                         h_prev: torch.Tensor, c_prev: torch.Tensor):
+        """
+        Un pas de temps + termes de régularisation, en un seul passage par porte.
+
+        Utilise HybridKANLayer.forward_with_reg() : edge_activations est appelé
+        1× par porte (au lieu de 3× avec forward + layer_l1_total + layer_entropy).
+
+        Returns:
+            h_t      : (batch, hidden_size)
+            c_t      : (batch, hidden_size)
+            l1_total : scalaire — Σ_portes Σ_ij |φ_ij|₁
+            entropy  : scalaire — Σ_portes S(Φ_l)
+        """
+        combined = torch.cat([h_prev, x_t], dim=-1)
+
+        f_raw, l1_f, ent_f = self.forget_gate.forward_with_reg(combined)
+        i_raw, l1_i, ent_i = self.input_gate.forward_with_reg(combined)
+        c_raw, l1_c, ent_c = self.candidate_gate.forward_with_reg(combined)
+        o_raw, l1_o, ent_o = self.output_gate.forward_with_reg(combined)
+
+        f_t     = torch.sigmoid(f_raw)
+        i_t     = torch.sigmoid(i_raw)
+        c_tilde = torch.tanh(c_raw)
+        o_t     = torch.sigmoid(o_raw)
+
+        c_t = f_t * c_prev + i_t * c_tilde
+        h_t = o_t * torch.tanh(c_t)
+
+        return h_t, c_t, l1_f + l1_i + l1_c + l1_o, ent_f + ent_i + ent_c + ent_o
+
     def l1_norm(self) -> torch.Tensor:
         """Somme des normes L1 proxy des 4 portes (pour la loss, eq. 4.25)."""
         return (self.forget_gate.l1_norm()
@@ -146,23 +177,20 @@ class MKANScorer(nn.Module):
         h_t = torch.zeros(batch, self.hidden_size, device=device)
         c_t = torch.zeros(batch, self.hidden_size, device=device)
 
-        reg_l1      = torch.tensor(0.0, device=device)
-        reg_entropy = torch.tensor(0.0, device=device)
-
-        gates = [self.cell.forget_gate, self.cell.input_gate,
-                 self.cell.candidate_gate, self.cell.output_gate]
+        if return_reg:
+            reg_l1      = torch.tensor(0.0, device=device)
+            reg_entropy = torch.tensor(0.0, device=device)
 
         for t in range(W):
             x_t = x_window[:, t, :]
-
             if return_reg:
-                # combined = [h_{t-1}, x_t] — identique à ce que les portes voient
-                combined = torch.cat([h_t, x_t], dim=-1)
-                for gate in gates:
-                    reg_l1      = reg_l1      + gate.layer_l1_total(combined)
-                    reg_entropy = reg_entropy + gate.layer_entropy(combined)
-
-            h_t, c_t = self.cell(x_t, h_t, c_t)
+                # forward_with_reg : edge_activations appelé 1× par porte
+                # (au lieu de 3× avec forward + layer_l1_total + layer_entropy)
+                h_t, c_t, l1_t, ent_t = self.cell.forward_with_reg(x_t, h_t, c_t)
+                reg_l1      = reg_l1      + l1_t
+                reg_entropy = reg_entropy + ent_t
+            else:
+                h_t, c_t = self.cell(x_t, h_t, c_t)
 
         score = torch.sigmoid(self.projection(h_t)).squeeze(-1)
 

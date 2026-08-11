@@ -162,6 +162,43 @@ class HybridKANLayer(nn.Module):
         p      = (l1_mat / total).view(-1)
         return -(p * torch.log(p + 1e-12)).sum()
 
+    def forward_with_reg(self, x: torch.Tensor):
+        """
+        Forward + régularisation (L1 + entropie) en un seul appel à edge_activations.
+
+        Remplace l'enchaînement forward() + layer_l1_total() + layer_entropy() qui
+        appelait edge_activations 3× par porte par pas de temps (3× plus lent).
+
+        Returns:
+            out      : (batch, out_features)
+            l1_total : scalaire — Σ_ij |φ_ij|₁  (eq. 2.20)
+            entropy  : scalaire — S(Φ_l)         (section 4.3.3)
+        """
+        edges = self.edge_activations(x)   # (batch, in_features, out_features) — 1 seul appel
+
+        # Forward (identique à forward())
+        batch = x.shape[0]
+        out   = torch.zeros(batch, self.out_features, device=x.device, dtype=x.dtype)
+        add_idx = self._add_mask.nonzero(as_tuple=True)[0]
+        if len(add_idx) > 0:
+            out[:, add_idx] = edges[:, :, add_idx].sum(dim=1)
+        for j, spec in self._mult_specs.items():
+            if spec == "mult":
+                out[:, j] = edges[:, :, j].prod(dim=1)
+            else:
+                val = edges[:, spec[0], j]
+                for idx in spec[1:]:
+                    val = val * edges[:, idx, j]
+                out[:, j] = val
+
+        # Régularisation dérivée des mêmes activations
+        l1_mat   = edges.abs().mean(dim=0)          # (in_features, out_features)
+        l1_total = l1_mat.sum()
+        p        = (l1_mat / (l1_total + 1e-12)).view(-1)
+        entropy  = -(p * torch.log(p + 1e-12)).sum()
+
+        return out, l1_total, entropy
+
     def l1_norm(self) -> torch.Tensor:
         """
         Proxy de |Φ_l|₁ basé sur les poids (non conforme à eq. 2.19).

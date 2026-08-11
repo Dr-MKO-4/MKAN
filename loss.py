@@ -39,16 +39,23 @@ def weighted_bce(scores: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         ℓ_pred : scalaire
     """
     targets = targets.float()
-    n_fraud = targets.sum().clamp(min=1.0)
-    n_legit = (1.0 - targets).sum().clamp(min=1.0)
-    N       = float(targets.shape[0])
 
-    w_fraud = N / (2.0 * n_fraud)
-    w_legit = N / (2.0 * n_legit)
+    # Les comptes et poids sont calculés sur CPU via .item() pour éviter
+    # toute opération scalaire float64 sur DirectML (rsub/rdiv non supportés).
+    n_fraud = max(targets.sum().item(), 1.0)
+    n_legit = max(targets.shape[0] - n_fraud, 1.0)
+    N       = targets.shape[0]
 
-    weights = torch.where(targets == 1.0, w_fraud, w_legit)
-    # Clamp numérique : sigmoid peut saturer à 0/1 exact en float32 sur grandes entrées
-    scores = scores.clamp(min=1e-7, max=1.0 - 1e-7)
+    w_fraud_val = N / (2.0 * n_fraud)   # Python float — CPU
+    w_legit_val = N / (2.0 * n_legit)   # Python float — CPU
+
+    # torch.full_like crée un tenseur float32 sur le même device que targets
+    weights = torch.where(
+        targets == 1,
+        torch.full_like(targets, w_fraud_val),
+        torch.full_like(targets, w_legit_val),
+    )
+    scores = scores.clamp(min=1e-7, max=1 - 1e-7)
     return F.binary_cross_entropy(scores, targets, weight=weights)
 
 
