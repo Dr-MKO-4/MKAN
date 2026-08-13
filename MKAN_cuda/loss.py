@@ -56,7 +56,10 @@ def weighted_bce(scores: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     # torch.where diffuse w_fraud / w_legit (0-dim) vers la forme de targets
     weights = torch.where(targets == 1, w_fraud, w_legit)
     scores  = scores.clamp(min=1e-7, max=1.0 - 1e-7)
-    return F.binary_cross_entropy(scores, targets, weight=weights)
+    # F.binary_cross_entropy est blacklistee par PyTorch dans les contextes autocast.
+    # Formule inline equivalente — ops de base non blacklistees, toujours en fp32
+    # car scores et targets ont deja ete castes en float() ci-dessus.
+    return -(weights * (targets * scores.log() + (1.0 - targets) * (1.0 - scores).log())).mean()
 
 
 def mkan_total_loss(
