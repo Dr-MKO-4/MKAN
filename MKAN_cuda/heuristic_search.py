@@ -91,7 +91,7 @@ def build_mkan_fitness(
     import torch
     import numpy as np
     from torch.utils.data import DataLoader, TensorDataset
-    from MKAN import MKANScorer
+    from .. import MKANScorer
     from .loss import mkan_total_loss
 
     _lock         = threading.Lock()
