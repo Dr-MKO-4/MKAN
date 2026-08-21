@@ -1,5 +1,5 @@
 """
-heuristic_search.py (MKAN_cuda) — version GPU-CUDA de MKAN/heuristic_search.py.
+heuristic_search.py (MKAN_cuda)  version GPU-CUDA de MKAN/heuristic_search.py.
 
 Algorithme identique (genetique + EDA + mutation adaptative + diversite).
 Trois ajouts specifiques GPU dans build_mkan_fitness :
@@ -73,6 +73,7 @@ def build_mkan_fitness(
     num_workers:        int   = 0,
     pin_memory:         bool  = False,
     use_amp:            bool  = False,
+    checkpoint_dir:     str   = None,
 ) -> "callable":
     """
     Fabrique une fonction fitness connectee au workflow MKAN (train_colab.ipynb).
@@ -80,7 +81,7 @@ def build_mkan_fitness(
     Parametre supplementaires par rapport a MKAN/heuristic_search.py :
 
     num_workers        : workers du DataLoader (0 = sans fork, 2-4 sur Colab/Linux).
-    pin_memory         : True si device est CUDA — active le transfert asynchrone
+    pin_memory         : True si device est CUDA  active le transfert asynchrone
                          CPU->GPU via memoire epinglee.
     use_amp            : True pour activer torch.amp.autocast + GradScaler dans la
                          boucle d'entrainement et d'evaluation (CUDA uniquement).
@@ -224,6 +225,15 @@ def build_mkan_fitness(
                 _meilleur['state_dict'] = {
                     k: v.cpu().clone() for k, v in model.state_dict().items()
                 }
+                # Persistance sur disque pour survie aux coupures de kernel
+                if checkpoint_dir is not None:
+                    import os, json
+                    _hp_path = os.path.join(checkpoint_dir, 'best_search_hp.json')
+                    try:
+                        with open(_hp_path, 'w', encoding='utf-8') as _f:
+                            json.dump({'score': mcc, 'params': dict(params)}, _f, indent=2)
+                    except Exception:
+                        pass  # ne pas planter l'evaluation si Drive est inaccessible
 
         # ── Liberation explicite de la VRAM ───────────────────────────────────
         # Sur GPU, le GC Python ne libere pas immediatement la VRAM apres del.
@@ -251,7 +261,7 @@ def build_mkan_fitness(
 
 
 # ── RechercheHeuristique ──────────────────────────────────────────────────────
-# Identique a MKAN/heuristic_search.py — copiee ici pour que MKAN_cuda soit
+# Identique a MKAN/heuristic_search.py  copiee ici pour que MKAN_cuda soit
 # autonome (pas de besoin d'importer depuis MKAN pour cette classe).
 
 class RechercheHeuristique:
@@ -662,7 +672,7 @@ class RechercheHeuristique:
         fig.update_yaxes(range=[0.0, max_mut * 1.15 + 0.01], row=2, col=1)
         fig.update_xaxes(title_text='Generation', row=2, col=1)
         fig.update_layout(
-            title='Dynamique de la population — Diversite et refroidissement (MKAN_cuda)',
+            title='Dynamique de la population  Diversite et refroidissement (MKAN_cuda)',
             height=560, template='plotly_white', showlegend=False)
         return fig
 

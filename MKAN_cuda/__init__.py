@@ -1,5 +1,5 @@
 """
-MKAN_cuda — sous-package GPU-CUDA de MKAN (MKAN/MKAN_cuda/).
+MKAN_cuda  sous-package GPU-CUDA de MKAN (MKAN/MKAN_cuda/).
 
 Remplacement drop-in de MKAN pour une execution sur GPU CUDA (Colab T4, A100, etc.).
 Les modules inchanges sont re-exportes via imports relatifs depuis le package parent.
@@ -12,7 +12,7 @@ Usage dans train_colab.ipynb :
     from MKAN.MKAN_cuda import mkan_total_loss, build_mkan_fitness
 """
 
-# ── Modules inchanges — imports relatifs vers le package parent (MKAN/) ───────
+# ── Modules inchanges  imports relatifs vers le package parent (MKAN/) ───────
 from ..hybrid_edge  import HybridEdgeFunction
 from ..hybrid_layer import HybridKANLayer
 from ..cell         import TKANCell, MKANScorer

@@ -1,10 +1,10 @@
 """
-symbolic.py — Régression symbolique sur les courbes d'arêtes KAN (section 2.5, eq. 2.23).
+symbolic.py  Régression symbolique sur les courbes d'arêtes KAN (section 2.5, eq. 2.23).
 
 Pipeline :
-  1. fit_symbolic_candidate  — ajuste c*f(a*x+b)+d pour une famille f donnée
-  2. fit_symbolic_best       — cherche la meilleure famille dans SYMBOLIC_LIBRARY
-  3. format_formula          — formate le résultat en chaîne lisible COBAC
+  1. fit_symbolic_candidate   ajuste c*f(a*x+b)+d pour une famille f donnée
+  2. fit_symbolic_best        cherche la meilleure famille dans SYMBOLIC_LIBRARY
+  3. format_formula           formate le résultat en chaîne lisible COBAC
 
 Décision de conception (section 2.5.5) :
   Une arête dont le meilleur R² reste < r2_threshold est déclarée
@@ -15,12 +15,12 @@ Décision de conception (section 2.5.5) :
 Bibliothèque de fonctions (section 2.5.3) :
   Noyau formel de la thèse : {x², √|x|, sin, eˣ, log, 1/x, |x|}
   Extensions nécessaires (illustrées en eq. 4.20, 4.22 de la thèse) :
-    x        — identité/linéarité (cas dégénéré fréquent après élagage)
-    cos(x)   — complément de sin, composantes Fourier paires
-    tanh(x)  — saturation hyperbolique des features de vélocité (eq. 4.22)
-    x^3      — terme cubique pour asymétries plus marquées que x^2
-    sigmoid  — saturation logistique (score de risque, eq. 4.22)
-    softplus — transition douce log(1+eˣ) (eq. 4.20 : log(1+e^{β(r-r*)}))
+    x         identité/linéarité (cas dégénéré fréquent après élagage)
+    cos(x)    complément de sin, composantes Fourier paires
+    tanh(x)   saturation hyperbolique des features de vélocité (eq. 4.22)
+    x^3       terme cubique pour asymétries plus marquées que x^2
+    sigmoid   saturation logistique (score de risque, eq. 4.22)
+    softplus  transition douce log(1+eˣ) (eq. 4.20 : log(1+e^{β(r-r*)}))
 """
 
 import torch
@@ -128,7 +128,7 @@ def fit_symbolic_best(
     Args:
         curve_y       : courbe de l'arête (N,)
         x_grid        : grille d'évaluation numpy (N,)
-        library       : dict {nom: fn_torch} — SYMBOLIC_LIBRARY par défaut
+        library       : dict {nom: fn_torch}  SYMBOLIC_LIBRARY par défaut
         r2_threshold  : seuil de symbolifiabilité (défaut 0.99)
 
     Returns:

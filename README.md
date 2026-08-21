@@ -1,4 +1,4 @@
-# MKAN — Mobile Money KAN Fraud Detector
+# MKAN  Mobile Money KAN Fraud Detector
 
 Implémentation PyTorch du modèle **M-KAN** pour la détection de fraude Mobile Money en environnement CEMAC/COBAC, développé dans le cadre d'un mémoire de Master.
 
@@ -27,12 +27,12 @@ La fonction d'arête φᵢⱼ combine deux composantes :
 Chaque nœud de sortie j d'une `HybridKANLayer` agrège les arêtes entrantes de deux façons possibles, contrôlées par `node_types` :
 
 | `node_types[j]`    | Équation                              | Description                                |
-|--------------------|---------------------------------------|--------------------------------------------|
+|--||--|
 | `'add'` (défaut)   | `Σᵢ φᵢⱼ(xᵢ)` (eq. 4.14)             | Somme sur toutes les features entrantes    |
 | `'mult'`           | `Πᵢ φᵢⱼ(xᵢ)` (eq. 4.15)             | Produit sur toutes les features entrantes  |
 | `[i1, i2, ...]`    | `φᵢ₁ⱼ(xᵢ₁) · φᵢ₂ⱼ(xᵢ₂) · ...`      | Produit sur un sous-ensemble d'indices     |
 
-Le cas `[i1, i2]` — **interaction ciblée entre deux features** — est l'usage principal de MultKAN dans ce modèle (section 4.2.3).
+Le cas `[i1, i2]`  **interaction ciblée entre deux features**  est l'usage principal de MultKAN dans ce modèle (section 4.2.3).
 
 ### Pourquoi MultKAN ?
 
@@ -64,7 +64,7 @@ mult_pairs = {
 Avec `input_size=12`, `hidden_size=32`, les 12 features occupent les indices 32–43 dans le vecteur concaténé :
 
 | Feature         | Indice dans `x_t` | Indice dans `[h, x]` |
-|-----------------|-------------------|----------------------|
+|--|-|-|
 | `montant`       | 0                 | 32                   |
 | `solde_avant`   | 1                 | 33                   |
 | `r1`            | 2                 | 34                   |
@@ -72,7 +72,7 @@ Avec `input_size=12`, `hidden_size=32`, les 12 features occupent les indices 32�
 | `flag_nuit`     | 10                | 42                   |
 | `flag_weekend`  | 11                | 43                   |
 
-Interaction **"grand retrait nocturne"** (section 4.2.3) — nœud 0 de la porte `input` :
+Interaction **"grand retrait nocturne"** (section 4.2.3)  nœud 0 de la porte `input` :
 
 ```python
 model = MKANScorer(
@@ -87,7 +87,7 @@ model = MKANScorer(
 ## Modules
 
 | Fichier | Rôle |
-|---|---|
+|||
 | `hybrid_edge.py` | Fonction d'arête hybride (eq. 4.13) |
 | `hybrid_layer.py` | Couche KAN vectorisée : nœuds additifs (eq. 4.14) + nœuds MultKAN (eq. 4.15) + extension de grille (eq. 4.17–4.18) |
 | `cell.py` | Cellule T-KAN (4 portes KAN, eq. 4.7–4.12) + MKANScorer (eq. 4.16) |
@@ -143,7 +143,7 @@ Voir [`train.ipynb`](train.ipynb) pour le pipeline complet :
 2. Split train/val/test + construction des DataLoaders
 3. Évaluation des features (SHAP/importance)
 4. Pré-traitement avancé (SMOTE, normalisation)
-5. **Recherche heuristique des hyperparamètres** (`heuristic_search.py`) — algorithme génétique sur `ESPACE_MKAN_DEFAULT` ou `ESPACE_MKAN_ETENDU` (9 HP dont W et batch_size)
+5. **Recherche heuristique des hyperparamètres** (`heuristic_search.py`)  algorithme génétique sur `ESPACE_MKAN_DEFAULT` ou `ESPACE_MKAN_ETENDU` (9 HP dont W et batch_size)
 6. Entraînement `MKANScorer` avec warm start depuis les meilleurs poids trouvés (Adam, lr optimisé)
 7. Évaluation : MCC, AUC-ROC, PR-AUC, Score de Brier
 8. Détection de dérive JS + extension de grille adaptative
@@ -152,9 +152,9 @@ Voir [`train.ipynb`](train.ipynb) pour le pipeline complet :
 
 ## Métriques (section 3.4 du mémoire)
 
-- **MCC** — Coefficient de Corrélation de Matthews (métrique principale, eq. 3.1)
-- **AUC-ROC** — Aire sous la courbe ROC trapézoïdale (eq. 3.2)
-- **PR-AUC** — Aire sous la courbe Précision-Rappel (eq. 3.6)
-- **Score de Brier** — Calibration probabiliste (eq. 3.7)
+- **MCC**  Coefficient de Corrélation de Matthews (métrique principale, eq. 3.1)
+- **AUC-ROC**  Aire sous la courbe ROC trapézoïdale (eq. 3.2)
+- **PR-AUC**  Aire sous la courbe Précision-Rappel (eq. 3.6)
+- **Score de Brier**  Calibration probabiliste (eq. 3.7)
 
 Baseline XGBoost (Azamuke et al. 2025) : MCC = 0,82 · AUC = 0,97

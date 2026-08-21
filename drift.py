@@ -1,9 +1,9 @@
 """
-drift.py — Détection de dérive de distribution et déclenchement d'extension de grille
+drift.py  Détection de dérive de distribution et déclenchement d'extension de grille
            (eq. 4.19–4.20, section 4.3).
 
-  js_divergence        — divergence Jensen-Shannon entre deux histogrammes
-  detect_drift_region  — localise la région de dérive pour extension de grille
+  js_divergence         divergence Jensen-Shannon entre deux histogrammes
+  detect_drift_region   localise la région de dérive pour extension de grille
 """
 
 import numpy as np
@@ -21,7 +21,7 @@ def js_divergence(p: np.ndarray, q: np.ndarray, eps: float = 1e-12) -> float:
         eps  : stabilité numérique pour les bins vides
 
     Returns:
-        JS ∈ [0, log(2)] — 0 si les distributions sont identiques
+        JS ∈ [0, log(2)]  0 si les distributions sont identiques
     """
     p = p / (p.sum() + eps)
     q = q / (q.sum() + eps)
@@ -43,7 +43,7 @@ def detect_drift_region(
     Détecte une dérive de distribution et localise la région affectée (eq. 4.19–4.20).
 
     Étapes :
-      1. Calcul de JS(p_ref, p_cur) — si JS ≤ theta_drift : pas de dérive
+      1. Calcul de JS(p_ref, p_cur)  si JS ≤ theta_drift : pas de dérive
       2. Identification des bins où la densité courante dépasse kappa_ext × la densité
          de référence → région candidate pour extension de grille (eq. 4.20)
 

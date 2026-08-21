@@ -4,7 +4,7 @@ Recherche heuristique pour l'optimisation des hyperparamètres de MKANScorer.
 Algorithme génétique amélioré :
   • Élitisme + sélection par roulette + tournoi
   • Croisement à un point + mutation adaptative avec refroidissement
-  • Contrôle de la diversité (Hao & Solnon, 2024 — prévenir la convergence prématurée)
+  • Contrôle de la diversité (Hao & Solnon, 2024  prévenir la convergence prématurée)
   • Composante EDA : modèle probabiliste sur les meilleures solutions (Hao & Solnon, 2024)
   • Taux de mutation décroissant (analogie recuit simulé, Hao & Solnon, 2024)
 
@@ -52,7 +52,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # tqdm.auto sélectionne automatiquement tqdm.notebook dans Jupyter
-# et tqdm.tqdm en terminal — aucune modification requise selon l'environnement.
+# et tqdm.tqdm en terminal  aucune modification requise selon l'environnement.
 from tqdm.auto import tqdm
 
 
@@ -72,11 +72,11 @@ ESPACE_MKAN_DEFAULT = {
 
 # ── Espace étendu : inclut W et batch_size (optionnel) ────────────────────────
 # W et batch_size nécessitent de reconstruire les fenêtres / DataLoaders à
-# chaque évaluation — coût supérieur, mais exploration plus complète.
+# chaque évaluation  coût supérieur, mais exploration plus complète.
 # Utiliser ESPACE_MKAN_ETENDU à la place de ESPACE_MKAN_DEFAULT pour les activer.
 ESPACE_MKAN_ETENDU = {
     **ESPACE_MKAN_DEFAULT,
-    'W':          [5, 10, 15, 20],     # taille de la fenêtre glissante (pas de temps)
+    'W':          [10, 15, 20],         # taille de la fenêtre glissante (pas de temps)
     'batch_size': [64, 128, 256, 512], # taille des mini-lots
 }
 
@@ -89,9 +89,10 @@ def build_mkan_fitness(
     input_size:         int = 12,
     n_epochs:           int = 10,
     default_W:          int = 10,
-    default_batch_size: int = 256,
+    default_batch_size: int = 512,
     max_train_samples:  int = 30_000,
     max_val_samples:    int = 10_000,
+    checkpoint_dir:     str = "mkan_checkpoints",
 ) -> "callable":
     """
     Fabrique une fonction fitness connectée au workflow MKAN (train.ipynb).
@@ -110,7 +111,7 @@ def build_mkan_fitness(
 
     Thread-safety (n_workers > 1) :
       • _lock protège _meilleur ET _window_cache en écriture ET en lecture.
-      • get_meilleur() expose _meilleur via une copie réalisée sous verrou —
+      • get_meilleur() expose _meilleur via une copie réalisée sous verrou 
         aucune lecture hors verrou du dict partagé n'est possible.
       • Double-checked locking sur _window_cache : le test hors verrou est
         conservé pour les performances, mais la lecture effective des données
@@ -120,7 +121,7 @@ def build_mkan_fitness(
     Args:
         df_train           : DataFrame pandas normalisé (split train).
         df_val             : DataFrame pandas normalisé (split val).
-        make_windows       : callable(df, W) -> (X_np, y_np) — défini dans train.ipynb.
+        make_windows       : callable(df, W) -> (X_np, y_np)  défini dans train.ipynb.
         device             : torch.device ('cpu' ou 'cuda').
         input_size         : nombre de features d'entrée (12 dans le pipeline).
         n_epochs           : epochs d'entraînement rapide pour le ranking.
@@ -134,18 +135,17 @@ def build_mkan_fitness(
         params peut contenir : hidden_size, M, K, W, batch_size, lam, mu1, mu2, lr.
 
     Attributs exposés sur fitness_fn :
-        fitness_fn.get_meilleur() -> dict  — copie thread-safe de
+        fitness_fn.get_meilleur() -> dict   copie thread-safe de
             {'score': float, 'params': dict, 'state_dict': dict}.
     """
     import torch
     import numpy as np
-    from torch.utils.data import DataLoader, TensorDataset
     from MKAN import MKANScorer, mkan_total_loss
 
     # ── État partagé ──────────────────────────────────────────────────────────
     # _lock  : protège _meilleur et _window_cache contre les accès concurrents.
-    # _meilleur      : {'score', 'params', 'state_dict'} — mis à jour sous _lock.
-    # _window_cache  : {W: ((X_tr, y_tr), (X_vl, y_vl))} — écrit sous _lock,
+    # _meilleur      : {'score', 'params', 'state_dict'}  mis à jour sous _lock.
+    # _window_cache  : {W: ((X_tr, y_tr), (X_vl, y_vl))}  écrit sous _lock,
     #                  lu sous _lock (voir fitness_fn ci-dessous).
     _lock         = threading.Lock()
     _meilleur     = {'score': float('-inf'), 'state_dict': None, 'params': None}
@@ -182,51 +182,49 @@ def build_mkan_fitness(
                         xtr, ytr = make_windows(df_train, W, leave=False)
                         xvl, yvl = make_windows(df_val,   W, leave=False)
                     except TypeError:
-                        # Compatibilité si make_windows ne supporte pas leave=
                         xtr, ytr = make_windows(df_train, W)
                         xvl, yvl = make_windows(df_val,   W)
+                    # Sous-échantillonnage AU MOMENT DU CACHE  pas après la lecture.
+                    # Sans ça, W=5 génère 3.6M fenêtres en RAM avant de n'en garder que
+                    # 30k : OOM garanti sur 20 Go partagés CPU/GPU (Intel Iris Xe UMA).
+                    # Graine fixe 42 : même sous-ensemble pour tous les individus → scores
+                    # comparables et reproductibles (stabilité EDA).
+                    _rng_c = np.random.default_rng(42)
+                    if max_train_samples and len(xtr) > max_train_samples:
+                        _idx = _rng_c.choice(len(xtr), max_train_samples, replace=False)
+                        _idx.sort()
+                        xtr, ytr = xtr[_idx], ytr[_idx]
+                    if max_val_samples and len(xvl) > max_val_samples:
+                        _idx = _rng_c.choice(len(xvl), max_val_samples, replace=False)
+                        _idx.sort()
+                        xvl, yvl = xvl[_idx], yvl[_idx]
                     _window_cache[W] = ((xtr, ytr), (xvl, yvl))
                     tqdm.write(
                         f"  Cache W={W} prêt : {len(xtr):,} fenêtres train  /  {len(xvl):,} val"
                     )
 
-        # Lecture sous verrou : élimine la race entre lecture et écriture
-        # sur _window_cache[W] dans le cas où deux threads traitent le même W
-        # simultanément (peu probable avec ESPACE_MKAN_DEFAULT, mais correct
-        # avec ESPACE_MKAN_ETENDU où W varie).
         with _lock:
             (X_tr, y_tr), (X_vl, y_vl) = _window_cache[W]
 
         if len(X_tr) == 0 or len(X_vl) == 0:
-            return -1.0   # W trop grand pour les données disponibles
+            return -1.0
 
-        # ── Sous-échantillonnage reproductible ────────────────────────────────
-        # Graine fixe : même individu évalué deux fois → même score (stabilité EDA).
-        # Sans cette limite, 1.7M fenêtres × 10 epochs = plusieurs heures par individu.
-        _rng = np.random.default_rng(42)
-        if max_train_samples and len(X_tr) > max_train_samples:
-            _idx = _rng.choice(len(X_tr), max_train_samples, replace=False)
-            _idx.sort()
-            X_tr, y_tr = X_tr[_idx], y_tr[_idx]
-        if max_val_samples and len(X_vl) > max_val_samples:
-            _idx = _rng.choice(len(X_vl), max_val_samples, replace=False)
-            _idx.sort()
-            X_vl, y_vl = X_vl[_idx], y_vl[_idx]
+        # Pré-conversion numpy → float32 (zero-copy si déjà C-contigu float32).
+        # Les tenseurs restent sur CPU ; chaque batch est transféré individuellement
+        # via .to(device), ce qui est compatible DirectML et plus léger que DataLoader
+        # (élimine 1 170 appels __iter__/__next__/collate par évaluation).
+        X_tr_t = torch.from_numpy(np.ascontiguousarray(X_tr, dtype=np.float32))
+        y_tr_t = torch.from_numpy(np.ascontiguousarray(y_tr, dtype=np.float32))
+        X_vl_t = torch.from_numpy(np.ascontiguousarray(X_vl, dtype=np.float32))
+        y_vl_np = np.ascontiguousarray(y_vl, dtype=np.float32)
 
-        def _loader(X, y, shuffle):
-            # from_numpy est zero-copy si X/y sont déjà C-contigus float32.
-            # ascontiguousarray garantit la contiguïté ; dtype float32 évite
-            # d'entraîner en float64 (2× plus lent sur CPU).
-            # num_workers=0 : sur Windows/Jupyter, spawn > 0 gèle le kernel ;
-            # avec 86 % RAM, des workers supplémentaires risquent le swap SSD.
-            X_t = torch.from_numpy(np.ascontiguousarray(X, dtype=np.float32))
-            y_t = torch.from_numpy(np.ascontiguousarray(y, dtype=np.float32))
-            ds  = TensorDataset(X_t, y_t)
-            return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
-                              num_workers=0)
-
-        tr_loader = _loader(X_tr, y_tr, shuffle=True)
-        vl_loader = _loader(X_vl, y_vl, shuffle=False)
+        def _batches(X_cpu: torch.Tensor, y_cpu: torch.Tensor, shuffle: bool):
+            """Générateur de mini-lots sans overhead DataLoader."""
+            n   = X_cpu.shape[0]
+            idx = torch.randperm(n) if shuffle else torch.arange(n)
+            for s in range(0, n, batch_size):
+                sl = idx[s:s + batch_size]
+                yield X_cpu[sl].to(device), y_cpu[sl].to(device)
 
         model = MKANScorer(
             input_size  = input_size,
@@ -237,29 +235,43 @@ def build_mkan_fitness(
 
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-        # ── Entraînement ──────────────────────────────────────────────────────
-        model.train()
-        for _ in range(n_epochs):
-            for X_batch, y_batch in tr_loader:
-                X_batch = X_batch.to(device)
-                y_batch = y_batch.to(device)
-                optimizer.zero_grad(set_to_none=True)
-                loss, *_ = mkan_total_loss(
-                    model, X_batch, y_batch, lam=lam, mu1=mu1, mu2=mu2)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                optimizer.step()
+        try:
+            # ── Entraînement ──────────────────────────────────────────────────
+            model.train()
+            for _ in range(n_epochs):
+                for X_batch, y_batch in _batches(X_tr_t, y_tr_t, shuffle=True):
+                    optimizer.zero_grad(set_to_none=True)
+                    loss, *_ = mkan_total_loss(
+                        model, X_batch, y_batch, lam=lam, mu1=mu1, mu2=mu2)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    optimizer.step()
 
-        # ── Évaluation MCC sur val (eq. 3.1) ──────────────────────────────────
-        model.eval()
-        all_scores, all_labels = [], []
-        with torch.no_grad():
-            for X_batch, y_batch in vl_loader:
-                all_scores.append(model(X_batch.to(device)).cpu().numpy())
-                all_labels.append(y_batch.numpy())
+            # ── Évaluation MCC sur val (eq. 3.1) ──────────────────────────────
+            model.eval()
+            all_scores = []
+            n_val = X_vl_t.shape[0]
+            with torch.no_grad():
+                for s in range(0, n_val, batch_size):
+                    X_batch = X_vl_t[s:s + batch_size].to(device)
+                    all_scores.append(model(X_batch).cpu().numpy())
+
+        except RuntimeError as _oom:
+            # DirectML (Intel Iris Xe UMA) lève RuntimeError "DML allocator out
+            # of memory" quand le modèle + les activations dépassent la VRAM
+            # disponible.  On libère immédiatement et on signale un score invalide
+            # plutôt que de planter toute la recherche.
+            tqdm.write(
+                f"  [OOM] {params} → ignoré ({_oom.__class__.__name__}: "
+                f"{str(_oom)[:80]})"
+            )
+            import gc
+            del model, optimizer
+            gc.collect()
+            return -1.0
 
         scores = np.concatenate(all_scores)
-        labels = np.concatenate(all_labels).astype(int)
+        labels = y_vl_np.astype(int)
         preds  = (scores >= 0.5).astype(int)
 
         tp = int(((preds == 1) & (labels == 1)).sum())
@@ -281,6 +293,19 @@ def build_mkan_fitness(
                 _meilleur['state_dict'] = {
                     k: v.cpu().clone() for k, v in model.state_dict().items()
                 }
+                # Persistance sur disque  survie aux coupures de kernel Jupyter.
+                # Sauvegarde : JSON des HP + state_dict complet du modèle (.pt).
+                if checkpoint_dir is not None:
+                    import os, json
+                    try:
+                        os.makedirs(checkpoint_dir, exist_ok=True)
+                        _hp_path = os.path.join(checkpoint_dir, 'best_search_hp.json')
+                        _sd_path = os.path.join(checkpoint_dir, 'best_model.pt')
+                        with open(_hp_path, 'w', encoding='utf-8') as _f:
+                            json.dump({'score': mcc, 'params': dict(params)}, _f, indent=2)
+                        torch.save(_meilleur['state_dict'], _sd_path)
+                    except Exception as _e:
+                        tqdm.write(f"  Avertissement checkpoint : {_e}")
 
         # ── Libération explicite des buffers PyTorch ───────────────────────────
         # Le GC Python ne garantit pas la libération immédiate sur CPU :
@@ -303,7 +328,7 @@ def build_mkan_fitness(
         Returns:
             dict avec clés 'score' (float), 'params' (dict), 'state_dict' (dict).
             state_dict est une copie superficielle (les tenseurs sont déjà clonés
-            lors de la sauvegarde — pas besoin de re-cloner ici).
+            lors de la sauvegarde  pas besoin de re-cloner ici).
 
         Usage :
             meilleur = fitness_fn.get_meilleur()
@@ -328,16 +353,16 @@ class RechercheHeuristique:
     Trois améliorations par rapport à l'algorithme génétique classique
     (Hao & Solnon, 2024 ; Yang Lu & Felix Zhan, 2024) :
 
-    1. **Mutation adaptative** — le taux de mutation décroît d'un facteur
+    1. **Mutation adaptative**  le taux de mutation décroît d'un facteur
        `refroidissement` à chaque génération (analogie recuit simulé) :
        μ_{t+1} = max(min_mutation_rate, μ_t × refroidissement).
        Favorise l'exploration en début de recherche, l'exploitation en fin.
 
-    2. **Contrôle de la diversité** — si la fraction d'individus uniques tombe
+    2. **Contrôle de la diversité**  si la fraction d'individus uniques tombe
        sous `min_diversite`, des individus aléatoires remplacent les pires
        non-élites (Hao & Solnon §4.3 : prévenir la convergence prématurée).
 
-    3. **Composante EDA** — un modèle probabiliste est construit sur les meilleurs
+    3. **Composante EDA**  un modèle probabiliste est construit sur les meilleurs
        individus (fréquences empiriques + lissage de Laplace). Un tiers des enfants
        est généré par tirage selon ce modèle, guidant vers les régions prometteuses
        (Hao & Solnon §5).
@@ -349,7 +374,7 @@ class RechercheHeuristique:
         via ThreadPoolExecutor + le _lock interne de build_mkan_fitness.
 
     Args:
-        espace             : {str: list} — espace de recherche discret.
+        espace             : {str: list}  espace de recherche discret.
                              Utiliser `ESPACE_MKAN_DEFAULT` pour MKANScorer.
         fitness_fn         : callable(dict) -> float.
                              Utiliser `build_mkan_fitness(...)` pour le workflow MKAN.
@@ -359,7 +384,7 @@ class RechercheHeuristique:
         tournament_size    : taille des groupes pour la sélection par tournoi.
         mutation_rate      : taux initial de mutation ∈ [0, 1].
         refroidissement    : facteur multiplicatif du taux de mutation par génération
-                             (1.0 = aucun, 0.90 = fort, 0.97 = doux — recommandé).
+                             (1.0 = aucun, 0.90 = fort, 0.97 = doux  recommandé).
         min_mutation_rate  : plancher du taux de mutation après refroidissement.
         min_diversite      : seuil de diversité (fraction d'individus uniques ∈ [0, 1]).
                              En dessous : injection d'individus aléatoires.
@@ -400,7 +425,7 @@ class RechercheHeuristique:
         self.maximize           = maximize
         self.n_workers          = max(1, n_workers)
 
-        # État interne — réinitialisé à chaque appel à fit()
+        # État interne  réinitialisé à chaque appel à fit()
         self._population:             list  = []
         self._scores:                 list  = []
         self._journal:                list  = []
@@ -449,7 +474,7 @@ class RechercheHeuristique:
 
         Séquentiel (n_workers=1) :
             Chemin direct sans surcharge de threading. Barre tqdm avec leave=False
-            pour ne pas polluer la sortie Jupyter — le print explicite dans fit()
+            pour ne pas polluer la sortie Jupyter  le print explicite dans fit()
             assure la lisibilité persistante par génération.
 
         Parallèle (n_workers > 1) :
@@ -457,9 +482,9 @@ class RechercheHeuristique:
             tenseur, donc plusieurs évaluations (modèles distincts) s'exécutent
             réellement en parallèle sur CPU ou GPU partagé.
             Les scores sont écrits dans self._scores[i] depuis le thread principal
-            via as_completed — pas de race sur self._scores.
+            via as_completed  pas de race sur self._scores.
             fit() ne reconstruit self._scores qu'après pool.__exit__(), qui attend
-            la fin de tous les futures — pas de race entre reconstruction et écriture.
+            la fin de tous les futures  pas de race entre reconstruction et écriture.
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -717,7 +742,7 @@ class RechercheHeuristique:
             # 4. Enregistrement
             self._enregistrer_generation(gen, diversite, self._mutation_rate_courant)
 
-            # 5. Rapport — print explicite prioritaire sur set_postfix dans Jupyter.
+            # 5. Rapport  print explicite prioritaire sur set_postfix dans Jupyter.
             # set_postfix reste utile en terminal où print() et tqdm coexistent mal.
             scores_valides = [s for s in self._scores if s is not None]
             moy = sum(scores_valides) / len(scores_valides)
@@ -762,7 +787,7 @@ class RechercheHeuristique:
 
             # 10. Nouvelle génération
             # Note : pool.__exit__() dans _evaluer() garantit que tous les threads
-            # ont terminé avant d'arriver ici — pas de race sur _scores.
+            # ont terminé avant d'arriver ici  pas de race sur _scores.
             e_ind, e_scores  = self._elites()
             parents          = self._selectionner_parents()
             enfants          = self._generer_enfants(parents, freq=freq)
@@ -956,7 +981,7 @@ class RechercheHeuristique:
         fig.update_yaxes(range=[0.0, max_mut * 1.15 + 0.01], row=2, col=1)
         fig.update_xaxes(title_text='Génération', row=2, col=1)
         fig.update_layout(
-            title='Dynamique de la population — Diversité et refroidissement',
+            title='Dynamique de la population  Diversité et refroidissement',
             height=560,
             template='plotly_white',
             showlegend=False,

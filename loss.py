@@ -1,11 +1,11 @@
 """
-loss.py — Fonction de perte ℓ_total de MKAN (section 4.3.4).
+loss.py  Fonction de perte ℓ_total de MKAN (section 4.3.4).
 
 ℓ_total = ℓ_pred + λ(μ₁·Σ_l |Φ_l|₁ + μ₂·Σ_l S(Φ_l))
 
-  ℓ_pred    — entropie croisée binaire pondérée (section 4.3.1, eq. ℓ_pred)
-  |Φ_l|₁   — norme L1 exacte de la couche l (eq. 2.20), calculée sur le batch
-  S(Φ_l)   — entropie des contributions relatives des arêtes (section 4.3.3)
+  ℓ_pred     entropie croisée binaire pondérée (section 4.3.1, eq. ℓ_pred)
+  |Φ_l|₁    norme L1 exacte de la couche l (eq. 2.20), calculée sur le batch
+  S(Φ_l)    entropie des contributions relatives des arêtes (section 4.3.3)
 
 Valeurs initiales recommandées (section 4.3.4) : λ=1e-2, μ₁=1.0, μ₂=0.5
 """
@@ -32,12 +32,13 @@ def weighted_bce(scores: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     autant au gradient que celles sur la classe majoritaire légitime.
 
     Args:
-        scores  : (batch,) ∈ (0,1) — sorties de MKANScorer
-        targets : (batch,) ∈ {0,1} — étiquettes réelles
+        scores  : (batch,) ∈ (0,1)  sorties de MKANScorer
+        targets : (batch,) ∈ {0,1}  étiquettes réelles
 
     Returns:
         ℓ_pred : scalaire
     """
+    scores  = scores.float()
     targets = targets.float()
 
     # Les comptes et poids sont calculés sur CPU via .item() pour éviter
@@ -46,8 +47,8 @@ def weighted_bce(scores: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     n_legit = max(targets.shape[0] - n_fraud, 1.0)
     N       = targets.shape[0]
 
-    w_fraud_val = N / (2.0 * n_fraud)   # Python float — CPU
-    w_legit_val = N / (2.0 * n_legit)   # Python float — CPU
+    w_fraud_val = N / (2.0 * n_fraud)   # Python float  CPU
+    w_legit_val = N / (2.0 * n_legit)   # Python float  CPU
 
     # torch.full_like crée un tenseur float32 sur le même device que targets
     weights = torch.where(
@@ -56,7 +57,12 @@ def weighted_bce(scores: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         torch.full_like(targets, w_legit_val),
     )
     scores = scores.clamp(min=1e-7, max=1 - 1e-7)
-    return F.binary_cross_entropy(scores, targets, weight=weights)
+    # Formule inline  identique à F.binary_cross_entropy mais non bloquée par
+    # DirectML (binary_cross_entropy tombe en fallback CPU sur Intel Arc/Iris Xe).
+    # one : scalaire float32 sur le même device  évite scores.__rsub__(1.0) qui
+    # tente une promotion float64 non supportée par DirectML (Intel Iris Xe).
+    one = scores.new_ones(())
+    return -(weights * (targets * scores.log() + (one - targets) * (one - scores).log())).mean()
 
 
 def mkan_total_loss(
@@ -79,14 +85,14 @@ def mkan_total_loss(
 
     Args:
         model    : MKANScorer entraînable
-        x_window : (batch, W, input_size) — fenêtre glissante de transactions
-        targets  : (batch,) ∈ {0,1} — étiquettes
+        x_window : (batch, W, input_size)  fenêtre glissante de transactions
+        targets  : (batch,) ∈ {0,1}  étiquettes
         lam      : force globale de régularisation (défaut 1e-2, section 4.3.4)
         mu1      : poids norme L1     (défaut 1.0, section 4.3.4)
         mu2      : poids entropie     (défaut 0.5, section 4.3.4)
 
     Returns:
-        loss_total  : ℓ_total — à appeler .backward() dessus
+        loss_total  : ℓ_total  à appeler .backward() dessus
         loss_pred   : ℓ_pred seul (pour logging)
         reg_l1      : Σ_l |Φ_l|₁ accumulé (pour logging, detaché)
         reg_entropy : Σ_l S(Φ_l) accumulé (pour logging, detaché)

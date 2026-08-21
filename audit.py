@@ -1,17 +1,17 @@
 """
-audit.py — Élagage + extraction symbolique pour rapport d'audit COBAC
+audit.py  Élagage + extraction symbolique pour rapport d'audit COBAC
            (eq. 4.28, section 4.4.5–4.4.7).
 
 Pipeline d'audit complet :
-  1. edge_l1_matrix      — importance L1 de chaque arête sur un pool de données
-  2. prune_mask          — masque booléen des arêtes survivantes (seuil theta)
-  3. evaluate_edge_curve — courbe 1D d'une arête isolée sur grille
-  4. prune_and_extract   — élagage + régression symbolique sur une porte
-  5. extract_full_model_report — rapport complet sur les 4 portes T-KAN
+  1. edge_l1_matrix       importance L1 de chaque arête sur un pool de données
+  2. prune_mask           masque booléen des arêtes survivantes (seuil theta)
+  3. evaluate_edge_curve  courbe 1D d'une arête isolée sur grille
+  4. prune_and_extract    élagage + régression symbolique sur une porte
+  5. extract_full_model_report  rapport complet sur les 4 portes T-KAN
 
 Chaque arête survivante porte soit une formule symbolique auditables
 (R² ≥ r2_threshold) soit la mention explicite « non-symbolifiable (numerique) »
-— cohérent avec la politique de transparence section 2.5.5.
+ cohérent avec la politique de transparence section 2.5.5.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ def evaluate_edge_curve(
         layer    : HybridKANLayer source
         i        : indice de la feature d'entrée
         j        : indice du nœud de sortie
-        x_grid_t : grille 1D (N,) — doit être dans [-domain, domain]
+        x_grid_t : grille 1D (N,)  doit être dans [-domain, domain]
 
     Returns:
         curve : (N,) numpy float32

@@ -1,14 +1,14 @@
 """
-visualizer.py — Visualisations Plotly pour MKAN (section 6.3 / section 4.4.6).
+visualizer.py  Visualisations Plotly pour MKAN (section 6.3 / section 4.4.6).
 
 7 méthodes de visualisation :
-  plot_loss_curves           — perte totale décomposée (pred + reg), échelle log
-  plot_regularization_detail — Σ|Φ_l|₁ (eq. 2.20) et ΣS(Φ_l) (eq. 2.21) séparément
-  plot_metrics               — MCC, PR-AUC, Score de Brier sur la validation
-  plot_training_dashboard    — vue d'ensemble combinée 6 panneaux
-  plot_edge_heatmap          — heatmap L1 de toutes les arêtes d'une porte T-KAN
-  plot_edge_functions        — courbes individuelles avec décomposition Gaussienne/Fourier
-  plot_pruning_summary       — bilan du nombre d'arêtes survivantes par porte (eq. 4.28)
+  plot_loss_curves            perte totale décomposée (pred + reg), échelle log
+  plot_regularization_detail  Σ|Φ_l|₁ (eq. 2.20) et ΣS(Φ_l) (eq. 2.21) séparément
+  plot_metrics                MCC, PR-AUC, Score de Brier sur la validation
+  plot_training_dashboard     vue d'ensemble combinée 6 panneaux
+  plot_edge_heatmap           heatmap L1 de toutes les arêtes d'une porte T-KAN
+  plot_edge_functions         courbes individuelles avec décomposition Gaussienne/Fourier
+  plot_pruning_summary        bilan du nombre d'arêtes survivantes par porte (eq. 4.28)
 
 Usage minimal :
     from MKAN import MKANVisualizer
@@ -53,7 +53,7 @@ class MKANVisualizer:
           et courbes des fonctions d'activation individuelles (section 4.4.6).
 
     Le paramètre x_pool (attendu : tenseur (N, hidden+input) des entrées réelles
-    des portes — voir cellule « Pool d'audit » dans train.ipynb) permet le calcul
+    des portes  voir cellule « Pool d'audit » dans train.ipynb) permet le calcul
     des normes L1 exactes sur données réelles (eq. 2.19), conformément à la
     politique de transparence COBAC (section 2.5.5).
     """
@@ -136,8 +136,8 @@ class MKANVisualizer:
         fig = make_subplots(
             rows=1, cols=2,
             subplot_titles=(
-                "Norme L1 du réseau (Σ|Φ_l|₁, eq. 2.20) — sparsification",
-                "Entropie des couches (ΣS(Φ_l), eq. 2.21) — équirépartition",
+                "Norme L1 du réseau (Σ|Φ_l|₁, eq. 2.20)  sparsification",
+                "Entropie des couches (ΣS(Φ_l), eq. 2.21)  équirépartition",
             ),
         )
         fig.add_trace(go.Scatter(x=ep, y=l1, mode="lines+markers",
@@ -262,7 +262,7 @@ class MKANVisualizer:
         Heatmap de l'importance L1 de chaque arête (i → j) d'une porte T-KAN.
 
         Permet d'identifier visuellement quelles features ou quels états cachés
-        influencent le plus le comportement d'une porte — diagnostic auditabilité.
+        influencent le plus le comportement d'une porte  diagnostic auditabilité.
         """
         l1_mat    = self.compute_gate_l1_matrix(gate_name, x_pool)
         out_labels = [f"h_out[{j}]" for j in range(l1_mat.shape[1])]
@@ -274,7 +274,7 @@ class MKANVisualizer:
             colorbar=dict(title="|φ_ij|₁"),
         ))
         fig.update_layout(
-            title=(f"Structure des arêtes — porte «{gate_name}» "
+            title=(f"Structure des arêtes  porte «{gate_name}» "
                    f"(norme L1 individuelle, eq. 2.19)"),
             xaxis_title="Neurone de sortie (composante de l'état caché)",
             yaxis_title="Entrée [état caché h | features transactionnelles x]",
@@ -370,7 +370,7 @@ class MKANVisualizer:
         fig.update_layout(
             template="plotly_white",
             height=320 * nrows,
-            title=(f"Fonctions d'arête survivantes — porte «{gate_name}» "
+            title=(f"Fonctions d'arête survivantes  porte «{gate_name}» "
                    f"({n} arêtes, θ={theta})"),
             legend=dict(orientation="h", yanchor="bottom", y=1.04, x=0.15),
         )

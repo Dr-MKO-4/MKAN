@@ -1,11 +1,11 @@
 """
-loss.py (MKAN_cuda) — version GPU-CUDA de MKAN/loss.py.
+loss.py (MKAN_cuda)  version GPU-CUDA de MKAN/loss.py.
 
 Fonctions de perte identiques a MKAN/loss.py (section 4.3.4), avec une seule
 modification dans weighted_bce :
 
   Original  : les poids de classe sont calcules via .item() (extraction sur CPU)
-              pour contourner un bug DirectML — rsub/rdiv non supportes en float64
+              pour contourner un bug DirectML  rsub/rdiv non supportes en float64
               sur Intel Arc / Iris Xe.
   CUDA      : .item() est inutile sur CUDA (toutes les ops scalaires float32 sont
               supportees) et introduit un aller-retour CPU/GPU inutile.
@@ -33,13 +33,13 @@ def weighted_bce(scores: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     w_legitime = N_total / (2 * N_legitime)
 
     Version GPU : les poids sont calcules comme tenseurs float32 sur le device
-    cible — pas de round-trip CPU via .item().
+    cible  pas de round-trip CPU via .item().
     scores.float() garantit fp32 meme sous torch.amp.autocast (ou le modele
     produit du float16), car F.binary_cross_entropy necessite fp32.
 
     Args:
-        scores  : (batch,) dans (0,1) — sorties de MKANScorer (fp16 ou fp32)
-        targets : (batch,) dans {0,1} — etiquettes reelles
+        scores  : (batch,) dans (0,1)  sorties de MKANScorer (fp16 ou fp32)
+        targets : (batch,) dans {0,1}  etiquettes reelles
 
     Returns:
         l_pred : scalaire float32 sur le meme device que targets
@@ -47,7 +47,7 @@ def weighted_bce(scores: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     scores  = scores.float()
     targets = targets.float()
 
-    N       = targets.shape[0]                         # int Python — shape est CPU
+    N       = targets.shape[0]                         # int Python  shape est CPU
     n_fraud = targets.sum().clamp(min=1.0)             # tenseur on-device
     n_legit = (N - n_fraud).clamp(min=1.0)            # tenseur on-device
     w_fraud = N / (2.0 * n_fraud)                     # scalaire tenseur on-device
@@ -57,7 +57,7 @@ def weighted_bce(scores: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     weights = torch.where(targets == 1, w_fraud, w_legit)
     scores  = scores.clamp(min=1e-7, max=1.0 - 1e-7)
     # F.binary_cross_entropy est blacklistee par PyTorch dans les contextes autocast.
-    # Formule inline equivalente — ops de base non blacklistees, toujours en fp32
+    # Formule inline equivalente  ops de base non blacklistees, toujours en fp32
     # car scores et targets ont deja ete castes en float() ci-dessus.
     return -(weights * (targets * scores.log() + (1.0 - targets) * (1.0 - scores).log())).mean()
 

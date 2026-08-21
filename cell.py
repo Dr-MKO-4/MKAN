@@ -1,9 +1,9 @@
 """
-cell.py — Cellule récurrente T-KAN et scoreur MKAN (section 4.2.1, 4.2.4).
+cell.py  Cellule récurrente T-KAN et scoreur MKAN (section 4.2.1, 4.2.4).
 
-  TKANCell    — LSTM dont les 4 portes sont remplacées par des HybridKANLayer
+  TKANCell     LSTM dont les 4 portes sont remplacées par des HybridKANLayer
                 (eq. 4.7–4.12)
-  MKANScorer  — Déroulé temporel + projection vers score de risque (eq. 4.16)
+  MKANScorer   Déroulé temporel + projection vers score de risque (eq. 4.16)
 """
 
 import torch
@@ -17,7 +17,7 @@ class TKANCell(nn.Module):
     Cellule récurrente T-KAN (section 4.2.1, eq. 4.7–4.12).
 
     Les 4 portes LSTM (oubli, entrée, candidat, sortie) sont chacune calculées
-    par un opérateur KAN_smart — une HybridKANLayer — au lieu d'une
+    par un opérateur KAN_smart  une HybridKANLayer  au lieu d'une
     transformation affine nn.Linear standard.
 
     Args:
@@ -100,8 +100,8 @@ class TKANCell(nn.Module):
         Returns:
             h_t      : (batch, hidden_size)
             c_t      : (batch, hidden_size)
-            l1_total : scalaire — Σ_portes Σ_ij |φ_ij|₁
-            entropy  : scalaire — Σ_portes S(Φ_l)
+            l1_total : scalaire  Σ_portes Σ_ij |φ_ij|₁
+            entropy  : scalaire  Σ_portes S(Φ_l)
         """
         combined = torch.cat([h_prev, x_t], dim=-1)
 
@@ -144,9 +144,9 @@ class MKANScorer(nn.Module):
     Note :
         - États initiaux h_0, c_0 à zéro (convention standard, non précisé dans
           le mémoire).
-        - Déroulé par boucle Python explicite pour lisibilité et débogage —
+        - Déroulé par boucle Python explicite pour lisibilité et débogage 
           à optimiser (vmap/JIT) si les volumes le nécessitent.
-        - projection = nn.Linear classique, pas une couche KAN — fidèle à eq. 4.16.
+        - projection = nn.Linear classique, pas une couche KAN  fidèle à eq. 4.16.
     """
 
     def __init__(self, input_size: int, hidden_size: int,
@@ -168,18 +168,18 @@ class MKANScorer(nn.Module):
                          accumulés sur les W pas (Σ_t Σ_l |Φ_l|₁, Σ_t Σ_l S(Φ_l))
 
         Returns:
-            score      : (batch,) — probabilité de fraude ∈ (0, 1)
+            score      : (batch,)  probabilité de fraude ∈ (0, 1)
             reg_l1     : scalaire (seulement si return_reg=True)
             reg_entropy: scalaire (seulement si return_reg=True)
         """
         batch, W, _ = x_window.shape
         device = x_window.device
-        h_t = torch.zeros(batch, self.hidden_size, device=device)
-        c_t = torch.zeros(batch, self.hidden_size, device=device)
+        h_t = torch.zeros(batch, self.hidden_size, device=device, dtype=torch.float32)
+        c_t = torch.zeros(batch, self.hidden_size, device=device, dtype=torch.float32)
 
         if return_reg:
-            reg_l1      = torch.tensor(0.0, device=device)
-            reg_entropy = torch.tensor(0.0, device=device)
+            reg_l1      = torch.tensor(0.0, dtype=torch.float32, device=device)
+            reg_entropy = torch.tensor(0.0, dtype=torch.float32, device=device)
 
         for t in range(W):
             x_t = x_window[:, t, :]
@@ -199,5 +199,5 @@ class MKANScorer(nn.Module):
         return score
 
     def l1_norm(self) -> torch.Tensor:
-        """Proxy L1 (sans batch) — utiliser forward(return_reg=True) en entraînement."""
+        """Proxy L1 (sans batch)  utiliser forward(return_reg=True) en entraînement."""
         return self.cell.l1_norm()

@@ -1,8 +1,8 @@
 """
-hybrid_layer.py — Couche KAN vectorisée à fonctions d'arêtes hybrides (eq. 4.13–4.15, 4.17–4.18).
+hybrid_layer.py  Couche KAN vectorisée à fonctions d'arêtes hybrides (eq. 4.13–4.15, 4.17–4.18).
 
 Contient :
-  HybridKANLayer  — couche complète in_features × out_features avec nœuds additifs
+  HybridKANLayer   couche complète in_features × out_features avec nœuds additifs
                     (eq. 4.14) et multiplicatifs MultKAN (eq. 4.15)
                     + normes L1 exactes (eq. 2.19–2.20) et entropie (section 4.3.3)
                     + extension de grille adaptative (eq. 4.17–4.18)
@@ -25,8 +25,8 @@ class HybridKANLayer(nn.Module):
 
     Notes d'implémentation (section 4.2.2) :
       - Centres gaussiens partagés entre toutes les arêtes d'entrée (grille commune
-        sur domaine normalisé — simplification assumée, documentée).
-      - x doit arriver standardisé (pas de normalisation interne) — cohérent avec
+        sur domaine normalisé  simplification assumée, documentée).
+      - x doit arriver standardisé (pas de normalisation interne)  cohérent avec
         TopologyValidator.normalize() de la Phase 1.
       - extend_grid() casse le référencement de l'optimiseur (remplacement du
         nn.Parameter) : reconstruire l'optimiseur après extension.
@@ -62,16 +62,18 @@ class HybridKANLayer(nn.Module):
         self.register_buffer("_add_mask", torch.tensor([nt == "add" for nt in node_types]))
         self._mult_specs = {j: nt for j, nt in enumerate(node_types) if nt != "add"}
 
-        # Grille RBF partagée (buffer non appris)
+        # Grille RBF partagée (buffers non appris)
         centers = torch.linspace(-domain, domain, M)
         self.register_buffer("centers", centers)
         if h is None:
             h = (2 * domain) / (M - 1)
         self.register_buffer("h", torch.tensor(float(h)))
+        # Précompute -1/(2h²) : évite la division à chaque edge_activations (40×/batch)
+        self.register_buffer("neg_half_over_h2", torch.tensor(-0.5 / float(h) ** 2))
         k_idx = torch.arange(1, K + 1, dtype=torch.float32)
         self.register_buffer("k_idx", k_idx)
 
-        # Poids par arête (in_features, out_features, M ou K) — appris
+        # Poids par arête (in_features, out_features, M ou K)  appris
         self.w_gauss   = nn.Parameter(torch.randn(in_features, out_features, M) * 0.1)
         self.a_fourier = nn.Parameter(torch.randn(in_features, out_features, K) * 0.1)
         self.b_fourier = nn.Parameter(torch.randn(in_features, out_features, K) * 0.1)
@@ -85,7 +87,7 @@ class HybridKANLayer(nn.Module):
         """
         # Composante gaussienne
         diff        = x.unsqueeze(-1) - self.centers          # (batch, in_features, M)
-        gauss_basis = torch.exp(-(diff ** 2) / (2 * self.h ** 2))
+        gauss_basis = torch.exp(self.neg_half_over_h2 * diff ** 2)
         gauss_out   = torch.einsum("bim,ijm->bij", gauss_basis, self.w_gauss)
 
         # Composante Fourier
@@ -101,6 +103,11 @@ class HybridKANLayer(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """x : (batch, in_features) → (batch, out_features)"""
         edges = self.edge_activations(x)                       # (batch, in_features, out_features)
+
+        # Fast-path : cas par défaut (tous les nœuds additifs)  pas de zeros ni nonzero
+        if not self._mult_specs:
+            return edges.sum(dim=1)
+
         batch = x.shape[0]
         out   = torch.zeros(batch, self.out_features, device=x.device, dtype=x.dtype)
 
@@ -115,7 +122,7 @@ class HybridKANLayer(nn.Module):
                 # Produit sur TOUTES les in_features (cas général eq. 4.15)
                 out[:, j] = edges[:, :, j].prod(dim=1)
             else:
-                # Produit sur les indices spécifiés — spec est une liste [i1, i2, ...]
+                # Produit sur les indices spécifiés  spec est une liste [i1, i2, ...]
                 val = edges[:, spec[0], j]
                 for idx in spec[1:]:
                     val = val * edges[:, idx, j]
@@ -130,10 +137,10 @@ class HybridKANLayer(nn.Module):
         Matrice L1 exacte par arête (eq. 2.19) : mean_batch |φ_ij(x_i)|
 
         Args:
-            x : (batch, in_features) — batch courant
+            x : (batch, in_features)  batch courant
 
         Returns:
-            l1_mat : (in_features, out_features) — importance par arête
+            l1_mat : (in_features, out_features)  importance par arête
         """
         edges = self.edge_activations(x)          # (batch, in_features, out_features)
         return edges.abs().mean(dim=0)            # (in_features, out_features)
@@ -155,7 +162,7 @@ class HybridKANLayer(nn.Module):
         Maximale si toutes les arêtes contribuent également (réseau dense) ;
         minimale si une seule arête concentre toute la contribution.
         La tension L1/entropie dans ℓ_total produit un réseau parcimonieux
-        à contributions équiréparties — favorable à la régression symbolique.
+        à contributions équiréparties  favorable à la régression symbolique.
         """
         l1_mat = self.exact_l1_norm(x)            # (in_features, out_features)
         total  = l1_mat.sum() + 1e-12
@@ -171,25 +178,28 @@ class HybridKANLayer(nn.Module):
 
         Returns:
             out      : (batch, out_features)
-            l1_total : scalaire — Σ_ij |φ_ij|₁  (eq. 2.20)
-            entropy  : scalaire — S(Φ_l)         (section 4.3.3)
+            l1_total : scalaire  Σ_ij |φ_ij|₁  (eq. 2.20)
+            entropy  : scalaire  S(Φ_l)         (section 4.3.3)
         """
-        edges = self.edge_activations(x)   # (batch, in_features, out_features) — 1 seul appel
+        edges = self.edge_activations(x)   # (batch, in_features, out_features)  1 seul appel
 
         # Forward (identique à forward())
-        batch = x.shape[0]
-        out   = torch.zeros(batch, self.out_features, device=x.device, dtype=x.dtype)
-        add_idx = self._add_mask.nonzero(as_tuple=True)[0]
-        if len(add_idx) > 0:
-            out[:, add_idx] = edges[:, :, add_idx].sum(dim=1)
-        for j, spec in self._mult_specs.items():
-            if spec == "mult":
-                out[:, j] = edges[:, :, j].prod(dim=1)
-            else:
-                val = edges[:, spec[0], j]
-                for idx in spec[1:]:
-                    val = val * edges[:, idx, j]
-                out[:, j] = val
+        if not self._mult_specs:
+            out = edges.sum(dim=1)
+        else:
+            batch = x.shape[0]
+            out   = torch.zeros(batch, self.out_features, device=x.device, dtype=x.dtype)
+            add_idx = self._add_mask.nonzero(as_tuple=True)[0]
+            if len(add_idx) > 0:
+                out[:, add_idx] = edges[:, :, add_idx].sum(dim=1)
+            for j, spec in self._mult_specs.items():
+                if spec == "mult":
+                    out[:, j] = edges[:, :, j].prod(dim=1)
+                else:
+                    val = edges[:, spec[0], j]
+                    for idx in spec[1:]:
+                        val = val * edges[:, idx, j]
+                    out[:, j] = val
 
         # Régularisation dérivée des mêmes activations
         l1_mat   = edges.abs().mean(dim=0)          # (in_features, out_features)
@@ -220,10 +230,10 @@ class HybridKANLayer(nn.Module):
         documentée section 4.2.2) : une extension en réponse à la dérive sur une
         feature étend la résolution pour toutes les arêtes de la couche.
 
-        ⚠ Remplace le nn.Parameter w_gauss — reconstruire l'optimiseur après appel.
+        ⚠ Remplace le nn.Parameter w_gauss  reconstruire l'optimiseur après appel.
 
         Args:
-            region : tuple (xl, xr) — intervalle où ajouter des centres
+            region : tuple (xl, xr)  intervalle où ajouter des centres
             n_new  : nombre de centres à insérer (> 0)
 
         Returns:

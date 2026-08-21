@@ -1,5 +1,5 @@
 """
-hybrid_edge.py — Fonction d'arête hybride Gaussienne + Fourier (eq. 4.13, section 4.2.2).
+hybrid_edge.py  Fonction d'arête hybride Gaussienne + Fourier (eq. 4.13, section 4.2.2).
 
 Module autonome : une seule entrée scalaire → une sortie scalaire.
 Sert de brique de validation unitaire et de référence documentaire.
@@ -19,14 +19,14 @@ class HybridEdgeFunction(nn.Module):
            + sum_k [a_k cos(kx) + b_k sin(kx)]             [composante KAN-AD]
 
     Les centres mu_m sont fixes (buffer, non appris), uniformément répartis sur le
-    domaine normalisé [-domain, domain] — cohérent avec FastKAN (Li, 2024) où les
+    domaine normalisé [-domain, domain]  cohérent avec FastKAN (Li, 2024) où les
     centres RBF sont « fixés a priori sur l'espace d'entrée » (section 2.4.2).
     Seuls les poids w_gauss, a_fourier, b_fourier sont appris par rétropropagation.
 
     Args:
         M       : nombre de centres gaussiens (défaut 8, section 4.2.2)
         K       : ordre de Fourier (défaut 2, section 4.2.2)
-        domain  : demi-domaine d'entrée — x doit être normalisé dans [-domain, domain]
+        domain  : demi-domaine d'entrée  x doit être normalisé dans [-domain, domain]
         h       : largeur de bande RBF ; par défaut espacement inter-centres 2*domain/(M-1)
     """
 
@@ -65,5 +65,5 @@ class HybridEdgeFunction(nn.Module):
         return gauss_out + fourier_out
 
     def l1_norm(self, x: torch.Tensor) -> torch.Tensor:
-        """|phi|_1 (eq. 2.19) — moyenne des valeurs absolues sur le batch."""
+        """|phi|_1 (eq. 2.19)  moyenne des valeurs absolues sur le batch."""
         return self.forward(x).abs().mean()
