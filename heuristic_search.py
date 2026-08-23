@@ -138,9 +138,12 @@ def build_mkan_fitness(
         fitness_fn.get_meilleur() -> dict   copie thread-safe de
             {'score': float, 'params': dict, 'state_dict': dict}.
     """
+    import gc
+    import os
+    import json
     import torch
     import numpy as np
-    from MKAN import MKANScorer, mkan_total_loss
+    from MKAN import MKANScorer, mkan_total_loss, DMLAdam
 
     # ── État partagé ──────────────────────────────────────────────────────────
     # _lock  : protège _meilleur et _window_cache contre les accès concurrents.
@@ -209,22 +212,26 @@ def build_mkan_fitness(
         if len(X_tr) == 0 or len(X_vl) == 0:
             return -1.0
 
-        # Pré-conversion numpy → float32 (zero-copy si déjà C-contigu float32).
-        # Les tenseurs restent sur CPU ; chaque batch est transféré individuellement
-        # via .to(device), ce qui est compatible DirectML et plus léger que DataLoader
-        # (élimine 1 170 appels __iter__/__next__/collate par évaluation).
-        X_tr_t = torch.from_numpy(np.ascontiguousarray(X_tr, dtype=np.float32))
-        y_tr_t = torch.from_numpy(np.ascontiguousarray(y_tr, dtype=np.float32))
-        X_vl_t = torch.from_numpy(np.ascontiguousarray(X_vl, dtype=np.float32))
-        y_vl_np = np.ascontiguousarray(y_vl, dtype=np.float32)
+        # Pré-conversion numpy → float32 puis transfert unique sur device.
+        # Sur Intel Iris Xe (UMA), CPU et GPU partagent le même banc physique :
+        # le .to(device) est quasi-gratuit en latence mais élimine quand même
+        # les n_epochs × n_batches appels Python de dispatch dans la boucle.
+        # Budget mémoire : 15k × W × 12 × 4o ≈ 7 Mo train + 2.4 Mo val → négligeable.
+        X_tr_dev = torch.from_numpy(np.ascontiguousarray(X_tr, dtype=np.float32)).to(device)
+        y_tr_dev = torch.from_numpy(np.ascontiguousarray(y_tr, dtype=np.float32)).to(device)
+        X_vl_dev = torch.from_numpy(np.ascontiguousarray(X_vl, dtype=np.float32)).to(device)
+        y_vl_np  = np.ascontiguousarray(y_vl, dtype=np.float32)  # CPU : calcul MCC
 
-        def _batches(X_cpu: torch.Tensor, y_cpu: torch.Tensor, shuffle: bool):
-            """Générateur de mini-lots sans overhead DataLoader."""
-            n   = X_cpu.shape[0]
-            idx = torch.randperm(n) if shuffle else torch.arange(n)
+        def _batches(X_dev: torch.Tensor, y_dev: torch.Tensor, shuffle: bool):
+            """Générateur de mini-lots depuis tenseurs déjà sur device.
+            torch.randperm sur device : permutation générée par DirectML,
+            pas de round-trip CPU↔GPU par époque."""
+            n   = X_dev.shape[0]
+            idx = torch.randperm(n, device=X_dev.device) if shuffle \
+                  else torch.arange(n, device=X_dev.device)
             for s in range(0, n, batch_size):
-                sl = idx[s:s + batch_size]
-                yield X_cpu[sl].to(device), y_cpu[sl].to(device)
+                sl = idx[s:s + batch_size]   # slice calculé une seule fois
+                yield X_dev[sl], y_dev[sl]
 
         model = MKANScorer(
             input_size  = input_size,
@@ -233,28 +240,38 @@ def build_mkan_fitness(
             K           = K,
         ).to(device)
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        # DMLAdam : Adam (Kingma & Ba, 2015) réécrit avec mul_().add_() au lieu de
+        # lerp_() / addcmul_() / addcdiv_() non supportés par DirectML (Intel Iris Xe).
+        # Mathématiquement identique à torch.optim.Adam — aucun impact sur les gradients.
+        optimizer = DMLAdam(model.parameters(), lr=lr)
+
+        # Liste des paramètres mise en cache une fois : évite de recréer le
+        # générateur model.parameters() à chaque appel de clip_grad_norm_
+        # (n_epochs × n_batches fois dans la boucle d'entraînement).
+        _params = list(model.parameters())
 
         try:
             # ── Entraînement ──────────────────────────────────────────────────
             model.train()
             for _ in range(n_epochs):
-                for X_batch, y_batch in _batches(X_tr_t, y_tr_t, shuffle=True):
+                for X_batch, y_batch in _batches(X_tr_dev, y_tr_dev, shuffle=True):
                     optimizer.zero_grad(set_to_none=True)
                     loss, *_ = mkan_total_loss(
                         model, X_batch, y_batch, lam=lam, mu1=mu1, mu2=mu2)
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    torch.nn.utils.clip_grad_norm_(_params, max_norm=1.0)
                     optimizer.step()
 
             # ── Évaluation MCC sur val (eq. 3.1) ──────────────────────────────
+            # Les scores sont accumulés sur GPU puis rapatriés en un seul .cpu()
+            # au lieu d'un transfert GPU→CPU par batch (n_val/batch_size syncs → 1).
             model.eval()
-            all_scores = []
-            n_val = X_vl_t.shape[0]
+            score_parts = []
+            n_val = X_vl_dev.shape[0]
             with torch.no_grad():
                 for s in range(0, n_val, batch_size):
-                    X_batch = X_vl_t[s:s + batch_size].to(device)
-                    all_scores.append(model(X_batch).cpu().numpy())
+                    score_parts.append(model(X_vl_dev[s:s + batch_size]))
+            scores = torch.cat(score_parts).cpu().numpy()
 
         except RuntimeError as _oom:
             # DirectML (Intel Iris Xe UMA) lève RuntimeError "DML allocator out
@@ -265,19 +282,19 @@ def build_mkan_fitness(
                 f"  [OOM] {params} → ignoré ({_oom.__class__.__name__}: "
                 f"{str(_oom)[:80]})"
             )
-            import gc
-            del model, optimizer
+            del model, optimizer, _params, X_tr_dev, y_tr_dev, X_vl_dev
             gc.collect()
             return -1.0
 
-        scores = np.concatenate(all_scores)
-        labels = y_vl_np.astype(int)
-        preds  = (scores >= 0.5).astype(int)
+        # MCC sur masques booléens : évite deux .astype(int) et les tableaux
+        # intermédiaires associés (numpy travaille directement sur bool).
+        labels = y_vl_np.astype(bool)
+        preds  = scores >= 0.5
 
-        tp = int(((preds == 1) & (labels == 1)).sum())
-        tn = int(((preds == 0) & (labels == 0)).sum())
-        fp = int(((preds == 1) & (labels == 0)).sum())
-        fn = int(((preds == 0) & (labels == 1)).sum())
+        tp = int(( preds &  labels).sum())
+        tn = int((~preds & ~labels).sum())
+        fp = int(( preds & ~labels).sum())
+        fn = int((~preds &  labels).sum())
 
         num = tp * tn - fp * fn
         den = math.sqrt(float((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)))
@@ -296,7 +313,6 @@ def build_mkan_fitness(
                 # Persistance sur disque  survie aux coupures de kernel Jupyter.
                 # Sauvegarde : JSON des HP + state_dict complet du modèle (.pt).
                 if checkpoint_dir is not None:
-                    import os, json
                     try:
                         os.makedirs(checkpoint_dir, exist_ok=True)
                         _hp_path = os.path.join(checkpoint_dir, 'best_search_hp.json')
@@ -307,12 +323,9 @@ def build_mkan_fitness(
                     except Exception as _e:
                         tqdm.write(f"  Avertissement checkpoint : {_e}")
 
-        # ── Libération explicite des buffers PyTorch ───────────────────────────
-        # Le GC Python ne garantit pas la libération immédiate sur CPU :
-        # avec 86 % de RAM occupée, accumuler 12 modèles par génération
-        # sans del peut provoquer un OOM ou un fort swapping SSD.
-        import gc
-        del model, optimizer
+        # Libération explicite : le GC Python ne garantit pas la libération
+        # immédiate sur UMA (86 % de RAM occupée → swapping SSD sans del).
+        del model, optimizer, _params, X_tr_dev, y_tr_dev, X_vl_dev
         gc.collect()
 
         return mcc

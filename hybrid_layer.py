@@ -60,6 +60,10 @@ class HybridKANLayer(nn.Module):
                     f"indices {nt} hors de [0, {in_features})"
         self.node_types  = node_types
         self.register_buffer("_add_mask", torch.tensor([nt == "add" for nt in node_types]))
+        # _add_idx : indices des nœuds additifs, pré-calculés une fois à l'init.
+        # Évite un appel nonzero() sur le hotpath (forward/forward_with_reg appelés
+        # 4 portes × W pas de temps × n_batches fois par époque).
+        self.register_buffer("_add_idx", self._add_mask.nonzero(as_tuple=True)[0])
         self._mult_specs = {j: nt for j, nt in enumerate(node_types) if nt != "add"}
 
         # Grille RBF partagée (buffers non appris)
@@ -85,16 +89,30 @@ class HybridKANLayer(nn.Module):
         Calcule phi_ij(x_i) pour toutes les arêtes (eq. 4.13).
         x : (batch, in_features) → sortie (batch, in_features, out_features)
         """
-        # Composante gaussienne
-        diff        = x.unsqueeze(-1) - self.centers          # (batch, in_features, M)
-        gauss_basis = torch.exp(self.neg_half_over_h2 * diff ** 2)
-        gauss_out   = torch.einsum("bim,ijm->bij", gauss_basis, self.w_gauss)
+        x_col = x.unsqueeze(-1)                               # (batch, in_features, 1) — vue, pas de copie
 
-        # Composante Fourier
-        kx        = x.unsqueeze(-1) * self.k_idx              # (batch, in_features, K)
+        # Composante gaussienne
+        # einsum / broadcast+sum tous deux incompatibles DirectML @no_grad (version_counter)
+        # → bmm : opération BLAS unique, pas de tenseur intermédiaire exposé à Python
+        # gauss_basis (batch, in, M) ──permute(1,0,2)──▶ (in, batch, M)
+        # w_gauss     (in, out, M)   ──permute(0,2,1)──▶ (in, M, out)
+        # bmm ──▶ (in, batch, out)  ──permute(1,0,2)──▶ (batch, in, out)
+        diff        = x_col - self.centers                    # (batch, in_features, M)
+        gauss_basis = torch.exp(self.neg_half_over_h2 * diff.square())
+        gauss_out   = torch.bmm(
+            gauss_basis.permute(1, 0, 2),
+            self.w_gauss.permute(0, 2, 1)
+        ).permute(1, 0, 2)
+
+        # Composante Fourier — même pattern bmm
+        kx          = x_col * self.k_idx                      # (batch, in_features, K)
         cos_kx, sin_kx = torch.cos(kx), torch.sin(kx)
-        fourier_out = (torch.einsum("bik,ijk->bij", cos_kx, self.a_fourier) +
-                       torch.einsum("bik,ijk->bij", sin_kx, self.b_fourier))
+        fourier_out = (
+            torch.bmm(cos_kx.permute(1, 0, 2),
+                      self.a_fourier.permute(0, 2, 1)).permute(1, 0, 2) +
+            torch.bmm(sin_kx.permute(1, 0, 2),
+                      self.b_fourier.permute(0, 2, 1)).permute(1, 0, 2)
+        )
 
         return gauss_out + fourier_out                         # (batch, in_features, out_features)
 
@@ -112,17 +130,14 @@ class HybridKANLayer(nn.Module):
         out   = torch.zeros(batch, self.out_features, device=x.device, dtype=x.dtype)
 
         # Nœuds additifs (eq. 4.14) : somme sur toutes les in_features
-        add_idx = self._add_mask.nonzero(as_tuple=True)[0]
-        if len(add_idx) > 0:
-            out[:, add_idx] = edges[:, :, add_idx].sum(dim=1)
+        if len(self._add_idx) > 0:
+            out[:, self._add_idx] = edges[:, :, self._add_idx].sum(dim=1)
 
         # Nœuds multiplicatifs (eq. 4.15) : Π_i φ_ij(x_i)
         for j, spec in self._mult_specs.items():
             if spec == "mult":
-                # Produit sur TOUTES les in_features (cas général eq. 4.15)
                 out[:, j] = edges[:, :, j].prod(dim=1)
             else:
-                # Produit sur les indices spécifiés  spec est une liste [i1, i2, ...]
                 val = edges[:, spec[0], j]
                 for idx in spec[1:]:
                     val = val * edges[:, idx, j]
@@ -166,7 +181,7 @@ class HybridKANLayer(nn.Module):
         """
         l1_mat = self.exact_l1_norm(x)            # (in_features, out_features)
         total  = l1_mat.sum() + 1e-12
-        p      = (l1_mat / total).view(-1)
+        p      = (l1_mat * total.reciprocal()).view(-1)
         return -(p * torch.log(p + 1e-12)).sum()
 
     def forward_with_reg(self, x: torch.Tensor):
@@ -189,9 +204,8 @@ class HybridKANLayer(nn.Module):
         else:
             batch = x.shape[0]
             out   = torch.zeros(batch, self.out_features, device=x.device, dtype=x.dtype)
-            add_idx = self._add_mask.nonzero(as_tuple=True)[0]
-            if len(add_idx) > 0:
-                out[:, add_idx] = edges[:, :, add_idx].sum(dim=1)
+            if len(self._add_idx) > 0:
+                out[:, self._add_idx] = edges[:, :, self._add_idx].sum(dim=1)
             for j, spec in self._mult_specs.items():
                 if spec == "mult":
                     out[:, j] = edges[:, :, j].prod(dim=1)
@@ -204,7 +218,7 @@ class HybridKANLayer(nn.Module):
         # Régularisation dérivée des mêmes activations
         l1_mat   = edges.abs().mean(dim=0)          # (in_features, out_features)
         l1_total = l1_mat.sum()
-        p        = (l1_mat / (l1_total + 1e-12)).view(-1)
+        p        = (l1_mat * (l1_total + 1e-12).reciprocal()).view(-1)
         entropy  = -(p * torch.log(p + 1e-12)).sum()
 
         return out, l1_total, entropy

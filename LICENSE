@@ -1,21 +1,92 @@
-MIT License
+Licence de Recherche Académique — Projet MKAN
+==============================================
+Copyright (c) 2025 MOUKOKO EKAMBI GEORGES MIGUEL
+École Nationale Supérieure Polytechnique de Douala (ENSPD)
+Université de Douala — Laboratoire LIDIA
+Stage de recherche — Banque des États de l'Afrique Centrale (BEAC)
 
-Copyright (c) 2026 Dr-MKO-4
+TOUS DROITS RÉSERVÉS.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Ce logiciel, son code source, sa documentation, ses données et tous les
+fichiers associés (le « Projet MKAN ») constituent un travail de recherche
+original réalisé dans le cadre d'un mémoire de Master 2 portant sur la
+détection de fraude dans les systèmes de Mobile Money par réseau KAN
+récurrent (MKAN).
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. UTILISATIONS AUTORISÉES
+
+   Les droits suivants sont accordés gratuitement, sans autorisation
+   préalable, à des fins strictement académiques et personnelles :
+
+   a) Lecture et étude du code source et de la documentation.
+   b) Citation et référencement dans des publications académiques,
+      à condition de mentionner explicitement l'auteur, l'institution
+      et la référence complète du mémoire (voir section 4).
+   c) Reproduction de courts extraits (≤ 20 lignes de code ou ≤ 200 mots
+      de documentation) dans des travaux académiques, avec attribution.
+
+
+2. UTILISATIONS INTERDITES
+
+   Les utilisations suivantes sont formellement interdites sans autorisation
+   écrite préalable et signée de l'auteur :
+
+   a) Toute utilisation commerciale, directe ou indirecte, du Projet MKAN
+      ou de tout composant dérivé.
+   b) Toute redistribution, publication ou mise à disposition publique du
+      code source, des données ou de la documentation, sous quelque forme
+      que ce soit.
+   c) Toute modification, adaptation, traduction ou création d'œuvre dérivée
+      basée sur le Projet MKAN.
+   d) Toute incorporation du Projet MKAN ou d'un de ses composants dans un
+      autre logiciel, produit ou système.
+   e) Tout déploiement en environnement de production, que ce soit à titre
+      gratuit ou onéreux.
+   f) La présentation du Projet MKAN ou de ses composants comme étant le
+      travail d'une autre personne (plagiat).
+
+
+3. INTÉGRITÉ ACADÉMIQUE
+
+   Ce travail a fait l'objet d'un enregistrement académique auprès de
+   l'ENSPD et de la BEAC. Toute utilisation non autorisée ou tout plagiat
+   pourra faire l'objet de poursuites académiques et/ou judiciaires
+   conformément à la législation camerounaise en vigueur et aux conventions
+   internationales applicables en matière de propriété intellectuelle.
+
+
+4. ATTRIBUTION REQUISE
+
+   Toute publication académique, présentation ou rapport citant ou utilisant
+   ce travail doit comporter la référence suivante :
+
+     MOUKOKO EKAMBI GEORGES MIGUEL. « Détection de fraude Mobile Money
+     par réseau KAN récurrent : architecture MKAN et pipeline MoMTSim. »
+     Mémoire de Master 2, École Nationale Supérieure Polytechnique de
+     Douala (ENSPD), Université de Douala, Laboratoire LIDIA, 2025.
+     Stage réalisé à la Banque des États de l'Afrique Centrale (BEAC).
+
+
+5. AUCUNE GARANTIE
+
+   Le Projet MKAN est fourni « tel quel », sans garantie d'aucune sorte,
+   expresse ou implicite, y compris mais sans s'y limiter les garanties
+   implicites de qualité marchande, d'adéquation à un usage particulier
+   et d'absence de contrefaçon. L'auteur ne saurait en aucun cas être tenu
+   responsable de tout dommage direct, indirect, accessoire, spécial ou
+   consécutif résultant de l'utilisation ou de l'impossibilité d'utiliser
+   ce logiciel.
+
+
+6. CONTACT ET DEMANDES D'AUTORISATION
+
+   Pour toute demande d'autorisation d'utilisation, de collaboration
+   académique ou de licence commerciale :
+
+     Auteur  : MOUKOKO EKAMBI GEORGES MIGUEL
+     E-mail  : mko.digital.237@gmail.com
+     GitHub  : https://github.com/Dr-MKO-4
+
+   Toute autorisation accordée doit être formalisée par écrit et signée
+   par l'auteur pour être valide.

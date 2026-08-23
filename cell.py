@@ -178,8 +178,8 @@ class MKANScorer(nn.Module):
         c_t = torch.zeros(batch, self.hidden_size, device=device, dtype=torch.float32)
 
         if return_reg:
-            reg_l1      = torch.tensor(0.0, dtype=torch.float32, device=device)
-            reg_entropy = torch.tensor(0.0, dtype=torch.float32, device=device)
+            reg_l1      = torch.zeros(1, dtype=torch.float32, device=device)
+            reg_entropy = torch.zeros(1, dtype=torch.float32, device=device)
 
         for t in range(W):
             x_t = x_window[:, t, :]
@@ -187,8 +187,8 @@ class MKANScorer(nn.Module):
                 # forward_with_reg : edge_activations appelé 1× par porte
                 # (au lieu de 3× avec forward + layer_l1_total + layer_entropy)
                 h_t, c_t, l1_t, ent_t = self.cell.forward_with_reg(x_t, h_t, c_t)
-                reg_l1      = reg_l1      + l1_t
-                reg_entropy = reg_entropy + ent_t
+                reg_l1.add_(l1_t)       # in-place : évite W allocations de tenseurs
+                reg_entropy.add_(ent_t)
             else:
                 h_t, c_t = self.cell(x_t, h_t, c_t)
 

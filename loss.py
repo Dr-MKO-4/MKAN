@@ -13,7 +13,6 @@ Valeurs initiales recommandées (section 4.3.4) : λ=1e-2, μ₁=1.0, μ₂=0.5
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as F
 from typing import Tuple
 
 
@@ -50,12 +49,10 @@ def weighted_bce(scores: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     w_fraud_val = N / (2.0 * n_fraud)   # Python float  CPU
     w_legit_val = N / (2.0 * n_legit)   # Python float  CPU
 
-    # torch.full_like crée un tenseur float32 sur le même device que targets
-    weights = torch.where(
-        targets == 1,
-        torch.full_like(targets, w_fraud_val),
-        torch.full_like(targets, w_legit_val),
-    )
+    # Formule linéaire sur targets ∈ {0,1} : quand target=1 → w_fraud, quand target=0 → w_legit.
+    # Remplace torch.where + 2×full_like (3 allocations) par 1 mul + 1 add (0 allocation).
+    # Les scalaires Python sont sûrs en mul/add sur DirectML (pas de promotion float64).
+    weights = targets * (w_fraud_val - w_legit_val) + w_legit_val
     scores = scores.clamp(min=1e-7, max=1 - 1e-7)
     # Formule inline  identique à F.binary_cross_entropy mais non bloquée par
     # DirectML (binary_cross_entropy tombe en fallback CPU sur Intel Arc/Iris Xe).

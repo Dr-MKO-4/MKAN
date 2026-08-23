@@ -26,6 +26,7 @@ Bibliothèque de fonctions (section 2.5.3) :
 import torch
 import numpy as np
 from typing import Optional
+from .optim import DMLAdam
 
 
 # ── Bibliothèque de fonctions candidates (section 2.5.3 + extensions) ────────
@@ -84,7 +85,7 @@ def fit_symbolic_candidate(
     b = torch.nn.Parameter(torch.tensor(0.0))
     c = torch.nn.Parameter(torch.tensor(1.0))
     d = torch.nn.Parameter(torch.tensor(0.0))
-    optimizer = torch.optim.Adam([a, b, c, d], lr=lr)
+    optimizer = DMLAdam([a, b, c, d], lr=lr)
 
     for _ in range(n_steps):
         optimizer.zero_grad(set_to_none=True)

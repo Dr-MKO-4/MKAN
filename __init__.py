@@ -35,6 +35,7 @@ from .hybrid_edge  import HybridEdgeFunction
 from .hybrid_layer import HybridKANLayer
 from .cell         import TKANCell, MKANScorer
 from .loss         import weighted_bce, mkan_total_loss
+from .optim        import DMLAdam
 from .symbolic     import (SYMBOLIC_LIBRARY, fit_symbolic_candidate,
                             fit_symbolic_best, format_formula)
 from .drift        import js_divergence, detect_drift_region
@@ -51,6 +52,7 @@ __all__ = [
     # Entraînement
     "weighted_bce",
     "mkan_total_loss",
+    "DMLAdam",
     # Dérive
     "js_divergence",
     "detect_drift_region",
