@@ -28,7 +28,7 @@ def find_cell(cells, cell_id):
 cells = nb["cells"]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. Cell d9e72ba6 — recherche heuristique : ajouter sauvegarde search_state
+# 1. Cell d9e72ba6  recherche heuristique : ajouter sauvegarde search_state
 # ─────────────────────────────────────────────────────────────────────────────
 idx, cell = find_cell(cells, "d9e72ba6")
 assert cell is not None, "Cellule d9e72ba6 introuvable"
@@ -56,7 +56,7 @@ else:
     print("~ Cellule d9e72ba6 : déjà patchée")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. Cell 3861a116 — visualisations recherche : write_html + bypass si search absent
+# 2. Cell 3861a116  visualisations recherche : write_html + bypass si search absent
 # ─────────────────────────────────────────────────────────────────────────────
 idx, cell = find_cell(cells, "3861a116")
 assert cell is not None, "Cellule 3861a116 introuvable"
@@ -121,7 +121,7 @@ cell["outputs"] = []
 print("✓ Cellule 3861a116 : réécriture avec bypass et write_html")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. Nouvelle cellule bypass-training — AVANT 2678c2ce
+# 3. Nouvelle cellule bypass-training  AVANT 2678c2ce
 # ─────────────────────────────────────────────────────────────────────────────
 idx_train, cell_train = find_cell(cells, "2678c2ce")
 assert cell_train is not None, "Cellule 2678c2ce introuvable"
@@ -159,9 +159,9 @@ if os.path.exists(_state_path):
     print(f'Etat restaure : {int(_saved["last_epoch"])} epochs faites | '
           f'best val_MCC={best_val_mcc:.4f} (epoch {best_epoch})')
     if epochs_left > 0:
-        print(f'  → {epochs_left} epoch(s) restante(s) — lancer la boucle ci-dessous')
+        print(f'  → {epochs_left} epoch(s) restante(s)  lancer la boucle ci-dessous')
     else:
-        print(f'  → Entraînement COMPLET — passer directement a la section 7')
+        print(f'  → Entraînement COMPLET  passer directement a la section 7')
 else:
     # Aucun état sauvegardé : warm-start depuis le checkpoint, tout rereunter
     print('training_state.json absent  historique non récupérable.')
@@ -171,7 +171,7 @@ else:
     best_val_mcc = -1.0
     best_epoch   = 0
     start_epoch  = 1
-    print(f'Warm-start depuis best_mkan.pt — relance de 1 a {N_EPOCHS} epochs.')
+    print(f'Warm-start depuis best_mkan.pt  relance de 1 a {N_EPOCHS} epochs.')
     print(f'Astuce : si tu etais a ~95% (38/40), change N_EPOCHS=5 dans la')
     print(f'  cellule de configuration pour ne faire que les epochs manquantes.')
 
@@ -197,7 +197,7 @@ else:
     print("~ Cellule bypass-training : mise à jour")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. Cell 2678c2ce — boucle d'entraînement : start_epoch + sauvegarde état
+# 4. Cell 2678c2ce  boucle d'entraînement : start_epoch + sauvegarde état
 # ─────────────────────────────────────────────────────────────────────────────
 idx_train2, cell_train2 = find_cell(cells, "2678c2ce")
 assert cell_train2 is not None

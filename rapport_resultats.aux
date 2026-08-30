@@ -1,0 +1,101 @@
+\relax 
+\providecommand \babel@aux [2]{\global \let \babel@toc \@gobbletwo }
+\@nameuse{bbl@beforestart}
+\catcode `:\active 
+\catcode `;\active 
+\catcode `!\active 
+\catcode `?\active 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\babel@aux{french}{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Architecture et données expérimentales}{1}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Fonction d'activation d'arête}{1}{subsection.2.1}\protected@file@percent }
+\newlabel{eq:phi}{{1}{1}{Fonction d'activation d'arête}{equation.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Perte régularisée}{1}{subsection.2.2}\protected@file@percent }
+\newlabel{eq:loss}{{2}{1}{Perte régularisée}{equation.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Données expérimentales}{2}{subsection.2.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Partitions du jeu de données MoMTSim.}}{2}{table.caption.1}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:data}{{1}{2}{Partitions du jeu de données MoMTSim}{table.caption.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Recherche d'hyperparamètres}{2}{section.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Hyperparamètres optimaux issus de la recherche heuristique (MCC-val$\,= 0.9658$ au meilleur candidat).}}{2}{table.caption.2}\protected@file@percent }
+\newlabel{tab:hp}{{2}{2}{Hyperparamètres optimaux issus de la recherche heuristique (MCC-val$\,= 0.9658$ au meilleur candidat)}{table.caption.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{Analyse des choix retenus.}{2}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Convergence et courbes d'apprentissage}{2}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Tableau de bord d'entraînement}{2}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Phase 1  convergence rapide (époques 1–10).}{2}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Phase 2  stabilisation régularisée (époques 11–40).}{2}{section*.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Décomposition de la perte}{2}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Évolution des métriques de validation}{2}{subsection.4.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Évaluation comparative sur le jeu de test}{2}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Courbes ROC et Précision-Rappel}{2}{subsection.5.1}\protected@file@percent }
+\citation{azamuke2025}
+\citation{azamuke2025}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Tableau de bord complet de l'entraînement \textsc  {mkan}{}~: perte totale (éq.~\ref {eq:loss}), composante prédictive $\ell _{\text  {pred}}$, norme L1, entropie $S$, MCC et AUC-ROC de validation sur 40 époques. L'étoile ($\star $) indique le \emph  {checkpoint} sélectionné (époque~7).}}{3}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:training}{{1}{3}{Tableau de bord complet de l'entraînement \MKAN {}~: perte totale (éq.~\ref {eq:loss}), composante prédictive $\ell _{\text {pred}}$, norme L1, entropie $S$, MCC et AUC-ROC de validation sur 40 époques. L'étoile ($\star $) indique le \emph {checkpoint} sélectionné (époque~7)}{figure.caption.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Tableau comparatif des métriques}{3}{subsection.5.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Métriques comparatives sur le jeu de test (vert = meilleure valeur par colonne).}}{3}{figure.caption.10}\protected@file@percent }
+\newlabel{fig:metricstable}{{5}{3}{Métriques comparatives sur le jeu de test (vert = meilleure valeur par colonne)}{figure.caption.10}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Métriques de test (452\,349 fenêtres, $W=10$). Baselines internes entraînés sur 20\,000 fenêtres. $\uparrow $~: plus grand est mieux ; $\downarrow $~: plus petit est mieux.}}{3}{table.caption.11}\protected@file@percent }
+\newlabel{tab:metrics}{{3}{3}{Métriques de test (452\,349 fenêtres, $W=10$). Baselines internes entraînés sur 20\,000 fenêtres. $\uparrow $~: plus grand est mieux ; $\downarrow $~: plus petit est mieux}{table.caption.11}{}}
+\@writefile{toc}{\contentsline {paragraph}{Interprétation.}{3}{section*.12}\protected@file@percent }
+\citation{cobac2018}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Décomposition de la perte~: $\ell _{\text  {total}}$ (bleu), $\ell _{\text  {pred}}$ BCE pondérée (orange). L'échelle logarithmique révèle la convergence fine de la composante prédictive.}}{4}{figure.caption.7}\protected@file@percent }
+\newlabel{fig:loss}{{2}{4}{Décomposition de la perte~: $\ell _{\text {total}}$ (bleu), $\ell _{\text {pred}}$ BCE pondérée (orange). L'échelle logarithmique révèle la convergence fine de la composante prédictive}{figure.caption.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Matrice de confusion}{4}{subsection.5.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Matrice de confusion sur le jeu de test. TP~: fraudes détectées. TN~: légitimes correctement classées. FP~: fausses alarmes. FN~: fraudes manquées.}}{4}{figure.caption.13}\protected@file@percent }
+\newlabel{fig:cm}{{6}{4}{Matrice de confusion sur le jeu de test. TP~: fraudes détectées. TN~: légitimes correctement classées. FP~: fausses alarmes. FN~: fraudes manquées}{figure.caption.13}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Régularisation et sparsification}{4}{section.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Évolution des termes de régularisation}{4}{subsection.6.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Évolution de la norme L1 ($\|\Phi \|_1$) et de l'entropie d'activation ($S(\Phi )$) sur 40 époques. Les deux tendances opposées matérialisent l'équilibre \emph  {sparsification / équirépartition}.}}{4}{figure.caption.14}\protected@file@percent }
+\newlabel{fig:reg}{{7}{4}{Évolution de la norme L1 ($\|\Phi \|_1$) et de l'entropie d'activation ($S(\Phi )$) sur 40 époques. Les deux tendances opposées matérialisent l'équilibre \emph {sparsification / équirépartition}}{figure.caption.14}{}}
+\@writefile{toc}{\contentsline {paragraph}{Norme L1  sparsification.}{4}{section*.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Entropie  équirépartition.}{4}{section*.16}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Métriques de validation sur 40 époques~: MCC (critère de sélection du \emph  {checkpoint}), PR-AUC, AUC-ROC et score de Brier. Les zones grisées indiquent les oscillations liées au rééquilibrage L1+entropie.}}{5}{figure.caption.8}\protected@file@percent }
+\newlabel{fig:valmetrics}{{3}{5}{Métriques de validation sur 40 époques~: MCC (critère de sélection du \emph {checkpoint}), PR-AUC, AUC-ROC et score de Brier. Les zones grisées indiquent les oscillations liées au rééquilibrage L1+entropie}{figure.caption.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Bilan d'élagage par porte}{5}{subsection.6.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Nombre d'arêtes totales et survivantes (seuil $\theta =0.01$) pour chacune des quatre portes T-KAN.}}{5}{figure.caption.17}\protected@file@percent }
+\newlabel{fig:pruning}{{8}{5}{Nombre d'arêtes totales et survivantes (seuil $\theta =0.01$) pour chacune des quatre portes T-KAN}{figure.caption.17}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Élagage des arêtes par porte T-KAN ($N_{\text  {tot}}=448$ arêtes par porte, $d_h=16$).}}{5}{table.caption.18}\protected@file@percent }
+\newlabel{tab:pruning}{{4}{5}{Élagage des arêtes par porte T-KAN ($N_{\text {tot}}=448$ arêtes par porte, $d_h=16$)}{table.caption.18}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Fonctions d'activation et heatmaps}{5}{section.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Courbes d'arêtes $\varphi _{ij}(x)$}{5}{subsection.7.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Porte Forget.}{5}{section*.20}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Porte Candidate.}{5}{section*.21}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Cartes d'activation L1 (Heatmaps)}{5}{subsection.7.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Courbes ROC (gauche) et Précision-Rappel (droite)~: \textsc  {mkan}{} vs LSTM vs XGBoost sur 452\,349 fenêtres de test. La courbe PR est prioritaire pour les jeux déséquilibrés.}}{6}{figure.caption.9}\protected@file@percent }
+\newlabel{fig:rocpr}{{4}{6}{Courbes ROC (gauche) et Précision-Rappel (droite)~: \MKAN {} vs LSTM vs XGBoost sur 452\,349 fenêtres de test. La courbe PR est prioritaire pour les jeux déséquilibrés}{figure.caption.9}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {8}Détection de dérive conceptuelle}{6}{section.8}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {11}{\ignorespaces Divergence JS$\,(P_{\text  {réf}} \| P_{\text  {cur}})$ par variable entre l'entraînement (référence) et le test. Seuil de déclenchement $\tau _{\text  {drift}}=0.05$ (éq. 4.33 du mémoire) représenté en rouge.}}{6}{figure.caption.23}\protected@file@percent }
+\newlabel{fig:drift}{{11}{6}{Divergence JS$\,(P_{\text {réf}} \| P_{\text {cur}})$ par variable entre l'entraînement (référence) et le test. Seuil de déclenchement $\tau _{\text {drift}}=0.05$ (éq. 4.33 du mémoire) représenté en rouge}{figure.caption.23}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Divergences Jensen-Shannon par variable (test vs entraînement, $\tau =0.05$).}}{6}{table.caption.24}\protected@file@percent }
+\newlabel{tab:drift}{{5}{6}{Divergences Jensen-Shannon par variable (test vs entraînement, $\tau =0.05$)}{table.caption.24}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {9}{\ignorespaces Fonctions d'activation $\varphi _{ij}(x)$ (éq.~\ref {eq:phi}) pour les 6~arêtes les plus importantes de chaque porte T-KAN ($\theta =0.01$). \textcolor {mkanblue}{Bleu}~: composante gaussienne (FastKAN). \textcolor {lstmorange}{Orange}~: composante de Fourier (KAN-AD). Vert~: combinaison totale $\varphi _{ij}$.}}{7}{figure.caption.19}\protected@file@percent }
+\newlabel{fig:edgefuncs}{{9}{7}{Fonctions d'activation $\phiij (x)$ (éq.~\ref {eq:phi}) pour les 6~arêtes les plus importantes de chaque porte T-KAN ($\theta =0.01$). \textcolor {mkanblue}{Bleu}~: composante gaussienne (FastKAN). \textcolor {lstmorange}{Orange}~: composante de Fourier (KAN-AD). Vert~: combinaison totale $\phiij $}{figure.caption.19}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {9}Rapport d'audit symbolique COBAC}{7}{section.9}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {12}{\ignorespaces Rapport d'audit symbolique~: arêtes survivantes par porte, formule extraite par régression ($c\cdot f(ax+b)+d$), importance $|\varphi _{ij}|_1$ et $R^2$. Les arêtes marquées \@FB@og  non-symbolifiable\@FB@fg  \relax {} ont $R^2 < 0.80$.}}{7}{figure.caption.25}\protected@file@percent }
+\newlabel{fig:symbolic}{{12}{7}{Rapport d'audit symbolique~: arêtes survivantes par porte, formule extraite par régression ($c\cdot f(ax+b)+d$), importance $|\phiij |_1$ et $R^2$. Les arêtes marquées \og non-symbolifiable\fg {} ont $R^2 < 0.80$}{figure.caption.25}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {10}Explicabilité COBAC  analyse d'une décision}{7}{section.10}\protected@file@percent }
+\newlabel{sec:decision}{{10}{7}{Explicabilité COBAC  analyse d'une décision}{section.10}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {13}{\ignorespaces Explication de décision COBAC pour une transaction frauduleuse. Gauche~: contributions normalisées des variables au score. Droite~: jauge du score de risque (\textbf  {FRAUDE, 99.97\,\%}).}}{7}{figure.caption.26}\protected@file@percent }
+\newlabel{fig:decision}{{13}{7}{Explication de décision COBAC pour une transaction frauduleuse. Gauche~: contributions normalisées des variables au score. Droite~: jauge du score de risque (\textbf {FRAUDE, 99.97\,\%})}{figure.caption.26}{}}
+\citation{azamuke2025}
+\@writefile{lof}{\contentsline {figure}{\numberline {10}{\ignorespaces Cartes de chaleur de la norme L1 exacte $|\varphi _{ij}|_1$ pour les quatre portes T-KAN. Axes~: entrées ($d_h=16$ neurones d'état + 12 variables métier) $\times $ sorties ($d_h=16$ neurones). Une cellule rouge intense désigne une connexion fonctionnellement active.}}{8}{figure.caption.22}\protected@file@percent }
+\newlabel{fig:heatmaps}{{10}{8}{Cartes de chaleur de la norme L1 exacte $|\phiij |_1$ pour les quatre portes T-KAN. Axes~: entrées ($d_h=16$ neurones d'état + 12 variables métier) $\times $ sorties ($d_h=16$ neurones). Une cellule rouge intense désigne une connexion fonctionnellement active}{figure.caption.22}{}}
+\@writefile{toc}{\contentsline {paragraph}{Transaction analysée.}{8}{section*.27}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Contributions des variables.}{8}{section*.28}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Valeur réglementaire.}{8}{section*.29}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {11}Conclusion}{8}{section.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Performance discriminative.}{8}{section*.30}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Interprétabilité structurelle.}{8}{section*.31}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Robustesse et dérive.}{8}{section*.32}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Conformité COBAC.}{8}{section*.33}\protected@file@percent }
+\bibcite{azamuke2025}{1}
+\bibcite{liu2024kan}{2}
+\bibcite{cobac2018}{3}
+\bibcite{hochreiter1997}{4}
+\bibcite{li2024fastkan}{5}
+\@writefile{toc}{\contentsline {paragraph}{Perspectives.}{9}{section*.34}\protected@file@percent }
+\gdef \@abspage@last{9}

@@ -28,7 +28,7 @@ def explain_transaction(
     Calcule la contribution de chaque feature à la décision pour une fenêtre.
 
     La contribution d'une feature i est définie comme la moyenne (sur les W pas
-    de temps et les 4 portes) des activations d'arêtes |φ_ij(x_i)|₁ — cohérent
+    de temps et les 4 portes) des activations d'arêtes |φ_ij(x_i)|₁  cohérent
     avec la norme L1 utilisée pour l'élagage (eq. 2.19).
 
     Args:
@@ -180,7 +180,7 @@ def plot_decision_explanation(explanation: dict, top_k: int = 12) -> go.Figure:
     fig.update_xaxes(title_text="Contribution relative", range=[0, max(contribs) * 1.2],
                      row=1, col=1)
     fig.update_layout(
-        title  = (f"Explication de décision MKAN — Score : {score:.3f}  ({verdict})  "
+        title  = (f"Explication de décision MKAN  Score : {score:.3f}  ({verdict})  "
                   f"[seuil {explanation['threshold']:.2f}]"),
         height = 520,
         width  = 1000,
@@ -219,14 +219,14 @@ def plot_symbolic_report(report: dict, feature_names: list[str],
                 "Sortie":      e["output"],
                 "Importance":  f"{e['l1_importance']:.4f}",
                 "Formule":     e["formula"],
-                "R²":          f"{e['r2']:.4f}" if e["r2"] is not None else "—",
+                "R²":          f"{e['r2']:.4f}" if e["r2"] is not None else "",
                 "Symbolif.":   "✓" if e["symbolifiable"] else "✗",
                 "_color":      gate_colors.get(gate_name, "#999"),
             })
 
     if not rows_data:
         fig = go.Figure()
-        fig.update_layout(title="Rapport symbolique — aucune arête active")
+        fig.update_layout(title="Rapport symbolique  aucune arête active")
         return fig
 
     fig = go.Figure(go.Table(
@@ -264,7 +264,7 @@ def plot_symbolic_report(report: dict, feature_names: list[str],
         ),
     ))
     fig.update_layout(
-        title  = "Rapport d'audit symbolique COBAC — Arêtes actives par porte T-KAN",
+        title  = "Rapport d'audit symbolique COBAC  Arêtes actives par porte T-KAN",
         height = max(300, 60 + 26 * len(rows_data)),
         margin = dict(t=50, b=10, l=10, r=10),
     )

@@ -125,7 +125,7 @@ def _extract_plotly_data_layout(content: str):
 
         i = idx + len(func)
 
-        # Passer le premier argument (id du div — chaîne entre guillemets)
+        # Passer le premier argument (id du div  chaîne entre guillemets)
         while i < len(content) and content[i] in ' \t\n\r':
             i += 1
         if i >= len(content) or content[i] not in ('"', "'"):

@@ -75,7 +75,7 @@ def plot_roc_pr_comparison(probas: dict[str, np.ndarray],
     Figure 2 panneaux : courbe ROC (gauche) + courbe Précision-Rappel (droite).
 
     La courbe PR est plus informative que la ROC sur des données déséquilibrées
-    (fraude rare) — les deux sont présentées pour couvrir les conventions académiques
+    (fraude rare)  les deux sont présentées pour couvrir les conventions académiques
     et réglementaires.
 
     Args:
@@ -131,7 +131,7 @@ def plot_roc_pr_comparison(probas: dict[str, np.ndarray],
     fig.update_xaxes(title_text="Rappel",    row=1, col=2, range=[0, 1])
     fig.update_yaxes(title_text="Précision", row=1, col=2, range=[0, 1])
     fig.update_layout(
-        title     = "Comparaison MKAN / LSTM / XGBoost — Jeu de test",
+        title     = "Comparaison MKAN / LSTM / XGBoost  Jeu de test",
         height    = 520,
         width     = 1100,
         legend    = dict(x=0.02, y=0.05, bgcolor="rgba(255,255,255,0.8)"),
@@ -194,7 +194,7 @@ def plot_metrics_table(metrics: dict[str, dict]) -> go.Figure:
         ),
     ))
     fig.update_layout(
-        title  = "Métriques de comparaison — Jeu de test  (vert = meilleur)",
+        title  = "Métriques de comparaison  Jeu de test  (vert = meilleur)",
         height = 300,
         margin = dict(t=50, b=10, l=10, r=10),
     )
@@ -255,7 +255,7 @@ def plot_drift_timeline(js_scores: list[float],
                   annotation_font_color="#F44336")
 
     fig.update_layout(
-        title  = f"Détection de dérive JS — {feature_name}",
+        title  = f"Détection de dérive JS  {feature_name}",
         xaxis_title = "Époque",
         yaxis_title = "Divergence Jensen-Shannon",
         height = 380,
