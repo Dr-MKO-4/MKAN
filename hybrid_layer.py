@@ -70,10 +70,10 @@ class HybridKANLayer(nn.Module):
         centers = torch.linspace(-domain, domain, M)
         self.register_buffer("centers", centers)
         if h is None:
-            h = (2 * domain) / (M - 1)
+            h = 2 * domain * (1.0 / (M - 1))
         self.register_buffer("h", torch.tensor(float(h)))
         # Précompute -1/(2h²) : évite la division à chaque edge_activations (40×/batch)
-        self.register_buffer("neg_half_over_h2", torch.tensor(-0.5 / float(h) ** 2))
+        self.register_buffer("neg_half_over_h2", torch.tensor(-0.5 * float(h) ** -2))
         k_idx = torch.arange(1, K + 1, dtype=torch.float32)
         self.register_buffer("k_idx", k_idx)
 
@@ -89,7 +89,7 @@ class HybridKANLayer(nn.Module):
         Calcule phi_ij(x_i) pour toutes les arêtes (eq. 4.13).
         x : (batch, in_features) → sortie (batch, in_features, out_features)
         """
-        x_col = x.unsqueeze(-1)                               # (batch, in_features, 1) — vue, pas de copie
+        x_col = x.unsqueeze(-1).clone()                       # (batch, in_features, 1)  copie : compatible inference_mode DirectML
 
         # Composante gaussienne
         # einsum / broadcast+sum tous deux incompatibles DirectML @no_grad (version_counter)
@@ -104,7 +104,7 @@ class HybridKANLayer(nn.Module):
             self.w_gauss.permute(0, 2, 1)
         ).permute(1, 0, 2)
 
-        # Composante Fourier — même pattern bmm
+        # Composante Fourier  même pattern bmm
         kx          = x_col * self.k_idx                      # (batch, in_features, K)
         cos_kx, sin_kx = torch.cos(kx), torch.sin(kx)
         fourier_out = (
@@ -279,7 +279,7 @@ class HybridKANLayer(nn.Module):
                 i_right = right_mask.nonzero(as_tuple=True)[0][0].item()
                 mu_left  = old_centers[i_left]
                 mu_right = old_centers[i_right]
-                t = (muk - mu_left) / (mu_right - mu_left + 1e-12)
+                t = (muk - mu_left) * (mu_right - mu_left + 1e-12).reciprocal()
                 new_w[:, :, k] = ((1 - t) * old_w_gauss[:, :, i_left]
                                   + t      * old_w_gauss[:, :, i_right])
 

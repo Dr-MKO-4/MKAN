@@ -102,7 +102,7 @@ def fit_symbolic_candidate(
         pred    = c * fn(a * x_t + b) + d
         ss_res  = ((y_t - pred) ** 2).sum()
         ss_tot  = ((y_t - y_t.mean()) ** 2).sum()
-        r2      = (1 - ss_res / (ss_tot + 1e-12)).item()
+        r2      = (1 - ss_res * (ss_tot + 1e-12).reciprocal()).item()
 
     return {
         "a": a.item(), "b": b.item(),

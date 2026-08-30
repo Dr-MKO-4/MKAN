@@ -242,7 +242,7 @@ def build_mkan_fitness(
 
         # DMLAdam : Adam (Kingma & Ba, 2015) réécrit avec mul_().add_() au lieu de
         # lerp_() / addcmul_() / addcdiv_() non supportés par DirectML (Intel Iris Xe).
-        # Mathématiquement identique à torch.optim.Adam — aucun impact sur les gradients.
+        # Mathématiquement identique à torch.optim.Adam  aucun impact sur les gradients.
         optimizer = DMLAdam(model.parameters(), lr=lr)
 
         # Liste des paramètres mise en cache une fois : évite de recréer le

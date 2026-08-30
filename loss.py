@@ -46,8 +46,8 @@ def weighted_bce(scores: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     n_legit = max(targets.shape[0] - n_fraud, 1.0)
     N       = targets.shape[0]
 
-    w_fraud_val = N / (2.0 * n_fraud)   # Python float  CPU
-    w_legit_val = N / (2.0 * n_legit)   # Python float  CPU
+    w_fraud_val = N * 0.5 * (1.0 / n_fraud)   # Python float  CPU
+    w_legit_val = N * 0.5 * (1.0 / n_legit)   # Python float  CPU
 
     # Formule linéaire sur targets ∈ {0,1} : quand target=1 → w_fraud, quand target=0 → w_legit.
     # Remplace torch.where + 2×full_like (3 allocations) par 1 mul + 1 add (0 allocation).

@@ -31,17 +31,23 @@ Usage minimal :
     report = extract_full_model_report(model, x_pool, feature_names)
 """
 
-from .hybrid_edge  import HybridEdgeFunction
-from .hybrid_layer import HybridKANLayer
-from .cell         import TKANCell, MKANScorer
-from .loss         import weighted_bce, mkan_total_loss
-from .optim        import DMLAdam
-from .symbolic     import (SYMBOLIC_LIBRARY, fit_symbolic_candidate,
-                            fit_symbolic_best, format_formula)
-from .drift        import js_divergence, detect_drift_region
-from .audit        import (edge_l1_matrix, prune_mask, evaluate_edge_curve,
-                            prune_and_extract, extract_full_model_report)
-from .visualizer   import MKANVisualizer
+from .hybrid_edge    import HybridEdgeFunction
+from .hybrid_layer   import HybridKANLayer
+from .cell           import TKANCell, MKANScorer
+from .loss           import weighted_bce, mkan_total_loss
+from .optim          import DMLAdam
+from .symbolic       import (SYMBOLIC_LIBRARY, fit_symbolic_candidate,
+                              fit_symbolic_best, format_formula)
+from .drift          import js_divergence, detect_drift_region
+from .audit          import (edge_l1_matrix, prune_mask, evaluate_edge_curve,
+                              prune_and_extract, extract_full_model_report)
+from .visualizer     import MKANVisualizer
+from .baselines      import (make_xgb_features, train_xgboost,
+                              LSTMBaseline, train_lstm, predict_proba)
+from .comparison_viz import (plot_roc_pr_comparison, plot_metrics_table,
+                              compute_all_metrics, plot_drift_timeline)
+from .explainability import (explain_transaction, plot_decision_explanation,
+                              plot_symbolic_report)
 
 __all__ = [
     # Architecture
@@ -69,4 +75,19 @@ __all__ = [
     "extract_full_model_report",
     # Visualisation
     "MKANVisualizer",
+    # Baselines
+    "make_xgb_features",
+    "train_xgboost",
+    "LSTMBaseline",
+    "train_lstm",
+    "predict_proba",
+    # Comparaison
+    "plot_roc_pr_comparison",
+    "plot_metrics_table",
+    "compute_all_metrics",
+    "plot_drift_timeline",
+    # Explicabilité
+    "explain_transaction",
+    "plot_decision_explanation",
+    "plot_symbolic_report",
 ]

@@ -338,17 +338,25 @@ class MKANVisualizer:
             full_y = evaluate_edge_curve(layer, int(i), int(j), x_grid)
 
             # Décomposition interne Gaussienne vs Fourier (section 4.2.2)
-            with torch.inference_mode():
-                batch       = torch.zeros(len(x_grid), layer.in_features, device=dev)
-                batch[:, i] = x_grid
-                diff        = batch.unsqueeze(-1) - layer.centers       # (N, in, M)
-                gauss_basis = torch.exp(-(diff ** 2) / (2 * layer.h ** 2))
-                gauss_only  = (gauss_basis[:, i, :] @ layer.w_gauss[i, j, :]).cpu().numpy()
-                kx          = batch.unsqueeze(-1) * layer.k_idx         # (N, in, K)
+            # Calcul sur CPU : contourne le bug version_counter DirectML sous no_grad
+            with torch.no_grad():
+                batch        = torch.zeros(len(x_grid), layer.in_features)
+                batch[:, i]  = x_grid.cpu()
+                centers_cpu  = layer.centers.cpu()
+                h_cpu        = layer.h.cpu()
+                k_idx_cpu    = layer.k_idx.cpu()
+                w_gauss_cpu  = layer.w_gauss.detach().cpu()
+                a_fourier_cpu = layer.a_fourier.detach().cpu()
+                b_fourier_cpu = layer.b_fourier.detach().cpu()
+                diff        = batch.unsqueeze(-1) - centers_cpu          # (N, in, M)
+                inv_2h2     = 0.5 * float(h_cpu.item()) ** -2
+                gauss_basis = torch.exp(-(diff ** 2) * inv_2h2)
+                gauss_only  = (gauss_basis[:, i, :] @ w_gauss_cpu[i, j, :]).numpy()
+                kx          = batch.unsqueeze(-1) * k_idx_cpu            # (N, in, K)
                 fourier_only = (
-                    torch.cos(kx)[:, i, :] @ layer.a_fourier[i, j, :]
-                    + torch.sin(kx)[:, i, :] @ layer.b_fourier[i, j, :]
-                ).cpu().numpy()
+                    torch.cos(kx)[:, i, :] @ a_fourier_cpu[i, j, :]
+                    + torch.sin(kx)[:, i, :] @ b_fourier_cpu[i, j, :]
+                ).numpy()
 
             show = (idx == 0)
             fig.add_trace(go.Scatter(

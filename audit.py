@@ -19,6 +19,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 from typing import Optional
+from tqdm.auto import tqdm
 
 from .hybrid_layer import HybridKANLayer
 from .symbolic import fit_symbolic_best, format_formula
@@ -39,7 +40,7 @@ def edge_l1_matrix(layer: HybridKANLayer, x_pool: torch.Tensor) -> np.ndarray:
     Returns:
         l1_mat : (in_features, out_features) float64 numpy
     """
-    with torch.inference_mode():
+    with torch.no_grad():
         edges = layer.edge_activations(x_pool)   # (batch, in, out)
     return edges.abs().mean(dim=0).cpu().numpy()  # (in, out)
 
@@ -83,7 +84,7 @@ def evaluate_edge_curve(
     N = x_grid_t.shape[0]
     x = torch.zeros(N, layer.in_features, device=x_grid_t.device)
     x[:, i] = x_grid_t
-    with torch.inference_mode():
+    with torch.no_grad():
         edges = layer.edge_activations(x)   # (N, in, out)
     return edges[:, i, j].cpu().numpy()
 
@@ -143,7 +144,7 @@ def prune_and_extract(
     x_grid_np = x_grid_t.cpu().numpy()
 
     results = []
-    for i, j in surviving:
+    for i, j in tqdm(surviving, desc="  arêtes", unit="arête", leave=False):
         curve = evaluate_edge_curve(layer, int(i), int(j), x_grid_t)
         best  = fit_symbolic_best(curve, x_grid_np, r2_threshold=r2_threshold)
         results.append({
@@ -197,7 +198,8 @@ def extract_full_model_report(
         "output":    model.cell.output_gate,
     }
     report = {}
-    for gate_name, layer in gates.items():
+    for gate_name, layer in tqdm(gates.items(), desc="Portes T-KAN", unit="porte"):
+        tqdm.write(f"→ Porte {gate_name}")
         report[gate_name] = prune_and_extract(
             layer, x_pool, feature_names, hidden_size,
             theta=theta, r2_threshold=r2_threshold,

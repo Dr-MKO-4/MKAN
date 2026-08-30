@@ -23,11 +23,11 @@ def js_divergence(p: np.ndarray, q: np.ndarray, eps: float = 1e-12) -> float:
     Returns:
         JS ∈ [0, log(2)]  0 si les distributions sont identiques
     """
-    p = p / (p.sum() + eps)
-    q = q / (q.sum() + eps)
+    p = p * (1.0 / (p.sum() + eps))
+    q = q * (1.0 / (q.sum() + eps))
     m = 0.5 * (p + q)
-    kl_pm = np.sum(p * np.log((p + eps) / (m + eps)))
-    kl_qm = np.sum(q * np.log((q + eps) / (m + eps)))
+    kl_pm = np.sum(p * np.log((p + eps) * (1.0 / (m + eps))))
+    kl_qm = np.sum(q * np.log((q + eps) * (1.0 / (m + eps))))
     return float(0.5 * kl_pm + 0.5 * kl_qm)
 
 
@@ -69,9 +69,9 @@ def detect_drift_region(
     if js <= theta_drift:
         return None, js
 
-    p_ref = hist_ref / max(hist_ref.sum(), 1)
-    p_cur = hist_cur / max(hist_cur.sum(), 1)
-    exceed = (p_cur / (p_ref + 1e-12)) > kappa_ext
+    p_ref = hist_ref * (1.0 / max(hist_ref.sum(), 1))
+    p_cur = hist_cur * (1.0 / max(hist_cur.sum(), 1))
+    exceed = (p_cur * (1.0 / (p_ref + 1e-12))) > kappa_ext
 
     if not exceed.any():
         return None, js
