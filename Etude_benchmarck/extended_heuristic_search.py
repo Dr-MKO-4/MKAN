@@ -1395,11 +1395,13 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             try:
                 import torch as _torch
                 payload = _torch.load(self._best_candidate_path, map_location="cpu", weights_only=False)
+                _comp = payload.get("fitness_components") or {}
                 self._best_result = {
                     "model_state": payload["model_state"], "input_size": payload.get("input_size"),
                     "n_params": payload.get("n_params"),
                     "hidden_size_gru_adjusted": payload.get("hidden_size_gru_adjusted"),
-                    "fitness_components": payload.get("fitness_components"),
+                    "fitness_components": _comp,
+                    "fitness_total": _comp.get("fitness_total"),   # requis par _evaluer_un (comparaison)
                 }
             except Exception as exc:   # noqa: BLE001 — reprise best-effort (section 11)
                 print(f"  [avertissement] best_candidate.pt illisible au resume ({exc}) — "

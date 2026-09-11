@@ -1,0 +1,208 @@
+"""
+run_search.py  Script exécutable (pas un notebook) qui lance la recherche
+heuristique étendue (ExtendedHeuristicSearch, Étape 2) sur les données réelles
+du projet, avec reprise automatique sur interruption.
+
+Sources de données (branchées sur le workflow réel, cf. train.ipynb) :
+    Train : MOMTSIM/config/featuresLog.parquet   (~5,5 M tx, pool d'entraînement)
+    Val   : data/val_features.parquet            (150 K clients, seed 1001, ~1,65 M tx)
+    Test  : data/test_features.parquet           (150 K clients, seed 1002, ~1,65 M tx —
+                                                    chargé mais PAS utilisé par la fitness ;
+                                                    réservé à une évaluation finale hors
+                                                    recherche, comme dans train.ipynb)
+
+Préprocessing : compute_fitness() (extended_heuristic_search.py) construit déjà
+lui-même les régimes "raw"/"engineered" par appel à niveau1_harness.
+build_regime_frame + standardize + build_windows pour CHAQUE individu (le
+régime dépend de Input_Regime, un hyperparamètre structurel recherché — il ne
+peut donc pas être pré-calculé une fois pour toutes en dehors de la fitness).
+Ce pipeline est une simplification DÉLIBÉRÉE et documentée (niveau1_harness.py)
+du pipeline de train.ipynb (TopologyValidator + test de Kolmogorov-Smirnov par
+colonne) : train.ipynb ne traite que le régime "engineered" à 12 features avec
+un modèle d'architecture FIXE, alors que l'Étape 2 doit comparer "raw" et
+"engineered" pour une architecture VARIABLE (recherchée) — les deux pipelines
+coexistent pour des besoins différents, aucun des deux n'est remplacé ici.
+
+Device d'entraînement : sélection automatique MPS (Apple Silicon, ex. M4) >
+CUDA > CPU via select_training_device() — SANS AUCUN effet sur la latence de
+fitness, qui reste toujours mesurée sur CPU/batch=256 (contrainte USSD de
+production, indépendante de la machine de développement).
+
+Pénalité de latence : DÉSACTIVÉE PAR DÉFAUT dans ce script (--enable-latency-
+penalty pour la réactiver)  La latence
+reste mesurée et journalisée (CPU, batch=256, seuil 100 ms) pour audit ; elle
+ne soustrait simplement rien à la fitness par défaut ICI. Le protocole complet
+du mémoire (pénalité activée) reste reproductible via --enable-latency-penalty.
+
+Reprise / checkpointing : --resume (activé par défaut) recharge automatiquement
+search_checkpoint.json s'il existe et continue exactement où la recherche
+précédente s'est arrêtée (population, scores, historique, meilleur individu,
+taux de mutation, état RNG) — Ctrl+C puis relancer la même commande reprend le
+run sans perte. Tous les artefacts (extended_search_log.jsonl,
+heuristic_best_config.json, best_candidate.pt, fitness_convergence_extended.png)
+sont réécrits à chaque génération, donc consultables/graphables pendant que le
+run est en cours ou après une interruption.
+
+Usage :
+    python run_search.py
+    python run_search.py --n_generations 20 --population_size 16 --device mps
+    python run_search.py --enable-latency-penalty      # protocole intégral du mémoire
+    python run_search.py --no-resume                   # forcer un nouveau run
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import time
+
+import pandas as pd
+import torch
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from extended_heuristic_search import ExtendedHeuristicSearch, select_training_device  # noqa: E402
+
+_MODELISATION_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+DEFAULT_TRAIN_PATH = os.path.join(_MODELISATION_ROOT, "MOMTSIM", "config", "featuresLog.parquet")
+DEFAULT_VAL_PATH   = os.path.join(_MODELISATION_ROOT, "data", "val_features.parquet")
+DEFAULT_TEST_PATH  = os.path.join(_MODELISATION_ROOT, "data", "test_features.parquet")
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="Recherche heuristique étendue MKAN (Étape 2).")
+    p.add_argument("--train_path", default=DEFAULT_TRAIN_PATH)
+    p.add_argument("--val_path", default=DEFAULT_VAL_PATH)
+    p.add_argument("--test_path", default=DEFAULT_TEST_PATH)
+    p.add_argument("--scratch_dir", default=None,
+                   help="Défaut : /workspace/scratch/ si accessible, sinon "
+                        "MKAN/checkpoints/extended_search/ (cf. ExtendedHeuristicSearch).")
+    p.add_argument("--device", default=None,
+                   help="Device d'entraînement. Défaut : détection auto MPS > CUDA > CPU "
+                        "(sans effet sur la mesure de latence, toujours CPU).")
+    p.add_argument("--population_size", type=int, default=12)
+    p.add_argument("--elite_size", type=int, default=2)
+    p.add_argument("--n_generations", type=int, default=15)
+    p.add_argument("--tournament_size", type=int, default=3)
+    p.add_argument("--mutation_rate", type=float, default=0.35)
+    p.add_argument("--crossover_rate", type=float, default=0.9)
+    p.add_argument("--patience", type=int, default=6)
+    p.add_argument("--n_windows_eval", type=int, default=50_000,
+                   help="Protocole Étape 2 : 50 000 fenêtres train ET val par évaluation "
+                        "(ne pas modifier sans raison méthodologique).")
+    p.add_argument("--n_epochs_eval", type=int, default=10,
+                   help="Protocole Étape 2 : 10 époques par évaluation fitness.")
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--enable-latency-penalty", dest="enable_latency_penalty",
+                   action="store_true", default=False,
+                   help="Réactive la pénalité de latence dans la fitness (protocole "
+                        "intégral du mémoire, seuil 100 ms). Désactivée par défaut dans "
+                        "ce script (recherche sur GPU M4, hors contrainte USSD CPU de "
+                        "production) ; la latence reste toujours mesurée/journalisée.")
+    p.add_argument("--no-resume", dest="resume", action="store_false", default=True,
+                   help="Ignore un éventuel checkpoint existant et repart de zéro.")
+    p.add_argument("--skip-full-validation", dest="full_validation", action="store_false",
+                   default=True, help="Ne pas ré-évaluer le meilleur modèle sur "
+                                      "l'ensemble complet de data/val_features.parquet.")
+    p.add_argument("--export", action="store_true", default=True,
+                   help="Lance results_export.py (--format all) sur scratch_dir en fin de run.")
+    p.add_argument("--no-export", dest="export", action="store_false")
+    return p
+
+
+def _load_datasets(args) -> "tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]":
+    for label, path in (("train", args.train_path), ("val", args.val_path),
+                        ("test", args.test_path)):
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Fichier {label} introuvable : {path}")
+
+    t0 = time.time()
+    print(f"Chargement train : {args.train_path}")
+    df_train = pd.read_parquet(args.train_path)
+    print(f"  {len(df_train):,} transactions, {df_train['nameOrig'].nunique():,} comptes "
+         f"({time.time() - t0:.1f}s)")
+
+    t0 = time.time()
+    print(f"Chargement val   : {args.val_path}")
+    df_val = pd.read_parquet(args.val_path)
+    print(f"  {len(df_val):,} transactions, {df_val['nameOrig'].nunique():,} comptes "
+         f"({time.time() - t0:.1f}s)")
+
+    t0 = time.time()
+    print(f"Chargement test  : {args.test_path}  (chargé, non utilisé par la fitness)")
+    df_test = pd.read_parquet(args.test_path)
+    print(f"  {len(df_test):,} transactions ({time.time() - t0:.1f}s)")
+
+    return df_train, df_val, df_test
+
+
+def main(argv=None) -> int:
+    args = _build_arg_parser().parse_args(argv)
+
+    device = select_training_device(prefer=args.device)
+    print(f"Device d'entraînement : {device}  "
+         f"(latence de fitness toujours mesurée sur CPU, indépendamment de ce choix)")
+
+    df_train, df_val, df_test = _load_datasets(args)   # noqa: F841 (df_test conservé pour audit ultérieur)
+
+    search = ExtendedHeuristicSearch(
+        population_size=args.population_size, elite_size=args.elite_size,
+        n_generations=args.n_generations, tournament_size=args.tournament_size,
+        mutation_rate=args.mutation_rate, crossover_rate=args.crossover_rate,
+        patience=args.patience, n_windows_eval=args.n_windows_eval,
+        n_epochs_eval=args.n_epochs_eval, seed=args.seed,
+        scratch_dir=args.scratch_dir,
+    )
+    print(f"Sorties écrites dans : {search.scratch_dir}")
+    print(f"Pénalité de latence dans la fitness : "
+         f"{'ACTIVÉE (protocole intégral)' if args.enable_latency_penalty else 'DÉSACTIVÉE (mesurée/journalisée quand même)'}")
+
+    # enable_latency_penalty est un paramètre de compute_fitness (pas de ExtendedHeuristicSearch) ;
+    # on le propage via une fermeture légère pour ne pas modifier la signature de fit()/_evaluer_un.
+    import extended_heuristic_search as _ehs
+    _original_compute_fitness = _ehs.compute_fitness
+
+    def _compute_fitness_with_flag(config, df_tr, df_vl, dev, **kwargs):
+        kwargs.setdefault("enable_latency_penalty", args.enable_latency_penalty)
+        return _original_compute_fitness(config, df_tr, df_vl, dev, **kwargs)
+
+    _ehs.compute_fitness = _compute_fitness_with_flag
+    try:
+        best = search.fit(df_train, df_val, device=device, resume_from_checkpoint=args.resume)
+    finally:
+        _ehs.compute_fitness = _original_compute_fitness
+
+    print("\n" + "=" * 70)
+    print(f"Meilleure configuration : {best['params']}")
+    print(f"Score de fitness        : {best['score']:.4f}")
+    print("=" * 70)
+
+    if args.full_validation:
+        print("\nValidation finale du meilleur modèle sur l'ensemble complet de "
+             f"{args.val_path} (pas de sous-échantillonnage)...")
+        result = search.evaluate_best_on_full_validation(df_train, df_val, device=device)
+        if result:
+            print(f"  MCC={result['MCC']:.4f}  PR_AUC={result['PR_AUC']:.4f}  "
+                 f"Brier={result['Brier']:.4f}  AUC_ROC={result['AUC_ROC']:.4f}  "
+                 f"n_windows={result['n_windows']:,}")
+
+    try:
+        search.export_top5()
+        search.plot_convergence()
+    except Exception as exc:   # noqa: BLE001 — ne jamais faire échouer le run pour de la restitution
+        print(f"  [avertissement] export top5/plot_convergence : {exc}")
+
+    if args.export:
+        try:
+            import results_export
+            rc = results_export.main(["--output_dir", search.scratch_dir, "--format", "all"])
+            print(f"results_export terminé (code {rc}) — voir {search.scratch_dir}")
+        except Exception as exc:   # noqa: BLE001
+            print(f"  [avertissement] results_export a échoué : {exc}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
