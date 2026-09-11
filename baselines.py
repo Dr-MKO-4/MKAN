@@ -43,7 +43,10 @@ def make_xgb_features(X_windows: np.ndarray) -> np.ndarray:
 
 # ── XGBoost ──────────────────────────────────────────────────────────────────
 
-class _XGBTqdmCallback(xgb.callback.TrainingCallback):
+_XGBBase = xgb.callback.TrainingCallback if HAS_XGB else object
+
+
+class _XGBTqdmCallback(_XGBBase):
     """Callback tqdm pour XGBoost : barre de progression sur les estimateurs."""
 
     def __init__(self, n_estimators: int):

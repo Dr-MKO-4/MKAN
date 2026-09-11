@@ -65,6 +65,14 @@ def explain_transaction(
     gate_contribs = {g: np.zeros(concat_size)
                      for g in ["forget", "input", "candidate", "output"]}
 
+    # Pré-fetch des 4 portes + fonctions d'activation  évite getattr() dans la boucle
+    _GATE_SPECS = [
+        ("forget",    model.cell.forget_gate,    torch.sigmoid),
+        ("input",     model.cell.input_gate,     torch.sigmoid),
+        ("candidate", model.cell.candidate_gate, torch.tanh),
+        ("output",    model.cell.output_gate,    torch.sigmoid),
+    ]
+
     model.eval()
     inv_W = 1.0 / W
     with torch.no_grad():
@@ -75,13 +83,21 @@ def explain_transaction(
             x_t      = xw[:, t, :]
             combined = torch.cat([h_t, x_t], dim=-1)   # (1, concat_size)
 
-            for gate_name in ["forget", "input", "candidate", "output"]:
-                gate = getattr(model.cell, f"{gate_name}_gate")
-                edges = gate.edge_activations(combined)  # (1, concat_size, hidden_size)
-                contrib = edges.abs().mean(dim=-1).squeeze(0).cpu().numpy()
+            raw_outs = []
+            for gate_name, gate, act_fn in _GATE_SPECS:
+                edges = gate.edge_activations(combined)          # (1, concat_size, hidden_size)
+                contrib = edges.abs().mean(dim=-1).squeeze(0).numpy()
                 gate_contribs[gate_name] += contrib * inv_W
+                # Réutiliser edges pour calculer la sortie de la porte
+                # (évite un second appel gate(combined) dans model.cell)
+                raw_out = (edges.sum(dim=1) if not gate._mult_specs   # cas additif pur
+                           else gate(combined))                         # fallback si mult-nodes
+                raw_outs.append(act_fn(raw_out))
 
-            h_t, c_t = model.cell(x_t, h_t, c_t)
+            # Mettre à jour h_t, c_t depuis les sorties déjà calculées
+            f_t, i_t, c_tilde, o_t = raw_outs
+            c_t = f_t * c_t + i_t * c_tilde
+            h_t = o_t * torch.tanh(c_t)
 
         score = torch.sigmoid(model.projection(h_t)).squeeze().item()
 

@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex 2026.8.15)  30 AUG 2026 14:27
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (MiKTeX 25.12) (preloaded format=pdflatex 2026.8.15)  30 AUG 2026 15:09
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -586,7 +586,36 @@ Already applied: [0000/00/00] Old fixltx2e package on input line 53.
 \@dblbotnum=\count336
 \c@dblbotnumber=\count337
 )
-LaTeX Font Info:    Trying to load font information for T1+lmr on input line 56
+(C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/graphics\rotating.sty
+Package: rotating 2025/01/14 v2.16e rotated objects in LaTeX
+
+(C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/base\ifthen.sty
+Package: ifthen 2024/03/16 v1.1e Standard LaTeX ifthen package (DPC)
+)
+\c@r@tfl@t=\count338
+\rotFPtop=\skip65
+\rotFPbot=\skip66
+\rot@float@box=\box61
+\rot@mess@toks=\toks33
+)
+(C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/pdflscape\pdflscape.st
+y
+Package: pdflscape 2022-10-27 v0.13 Display of landscape pages in PDF
+
+(C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/pdflscape\pdflscape-no
+metadata.sty
+Package: pdflscape-nometadata 2022-10-28 v0.13 Display of landscape pages in PD
+F (HO)
+
+(C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/graphics\lscape.sty
+Package: lscape 2020/05/28 v3.02 Landscape Pages (DPC)
+)
+Package pdflscape Info: Auto-detected driver: pdftex on input line 81.
+)) (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/placeins\placeins.s
+ty
+Package: placeins 2005/04/18  v 2.2
+)
+LaTeX Font Info:    Trying to load font information for T1+lmr on input line 59
 .
  (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/lm\t1lmr.fd
 File: t1lmr.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
@@ -594,39 +623,39 @@ File: t1lmr.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/l3backend\l3backend-pd
 ftex.def
 File: l3backend-pdftex.def 2025-10-09 L3 backend support: PDF output (pdfTeX)
-\l__color_backend_stack_int=\count338
+\l__color_backend_stack_int=\count339
+) (rapport_resultats.aux
+Package babel Info: 'french' activates 'french' shorthands.
+(babel)             Reported on input line 21.
 )
-No file rapport_resultats.aux.
 \openout1 = `rapport_resultats.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-Package babel Info: 'french' activates 'french' shorthands.
-(babel)             Reported on input line 56.
-LaTeX Info: Redefining \degres on input line 56.
-LaTeX Info: Redefining \microtypecontext on input line 56.
-Package microtype Info: Applying patch `item' on input line 56.
-Package microtype Info: Applying patch `toc' on input line 56.
-Package microtype Info: Applying patch `eqnum' on input line 56.
-Package microtype Info: Applying patch `footnote' on input line 56.
-Package microtype Info: Applying patch `verbatim' on input line 56.
-LaTeX Info: Redefining \microtypesetup on input line 56.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 59.
+LaTeX Font Info:    ... okay on input line 59.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 59.
+LaTeX Font Info:    ... okay on input line 59.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 59.
+LaTeX Font Info:    ... okay on input line 59.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 59.
+LaTeX Font Info:    ... okay on input line 59.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 59.
+LaTeX Font Info:    ... okay on input line 59.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 59.
+LaTeX Font Info:    ... okay on input line 59.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 59.
+LaTeX Font Info:    ... okay on input line 59.
+LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 59.
+LaTeX Font Info:    ... okay on input line 59.
+LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 59.
+LaTeX Font Info:    ... okay on input line 59.
+LaTeX Info: Redefining \degres on input line 59.
+LaTeX Info: Redefining \microtypecontext on input line 59.
+Package microtype Info: Applying patch `item' on input line 59.
+Package microtype Info: Applying patch `toc' on input line 59.
+Package microtype Info: Applying patch `eqnum' on input line 59.
+Package microtype Info: Applying patch `footnote' on input line 59.
+Package microtype Info: Applying patch `verbatim' on input line 59.
+LaTeX Info: Redefining \microtypesetup on input line 59.
 Package microtype Info: Generating PDF output.
 Package microtype Info: Character protrusion enabled (level 2).
 Package microtype Info: Using default protrusion set `alltext'.
@@ -637,6 +666,7 @@ Package microtype Info: Patching command `\showhyphens'.
 Package microtype Info: No adjustment of tracking.
 Package microtype Info: No adjustment of interword spacing.
 Package microtype Info: No adjustment of character kerning.
+
 (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/microtype\mt-cmr.cfg
 File: mt-cmr.cfg 2013/05/19 v2.2 microtype config. file: Computer Modern Roman 
 (RS)
@@ -679,17 +709,17 @@ File: mt-cmr.cfg 2013/05/19 v2.2 microtype config. file: Computer Modern Roman
 (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/context/base/mkii\supp-pdf.m
 kii
 [Loading MPS to PDF converter (version 2006.09.02).]
-\scratchcounter=\count339
+\scratchcounter=\count340
 \scratchdimen=\dimen272
-\scratchbox=\box61
-\nofMPsegments=\count340
-\nofMParguments=\count341
-\everyMPshowfont=\toks33
-\MPscratchCnt=\count342
+\scratchbox=\box62
+\nofMPsegments=\count341
+\nofMParguments=\count342
+\everyMPshowfont=\toks34
+\MPscratchCnt=\count343
 \MPscratchDim=\dimen273
-\MPnumerator=\count343
-\makeMPintoPDFobject=\count344
-\everyMPtoPDFconversion=\toks34
+\MPnumerator=\count344
+\makeMPintoPDFobject=\count345
+\everyMPtoPDFconversion=\toks35
 )
 (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/epstopdf-pkg\epstopdf-
 base.sty
@@ -703,14 +733,23 @@ File: epstopdf-sys.cfg 2021/03/18 v2.0 Configuration of epstopdf for MiKTeX
 ))
 Package caption Info: Begin \AtBeginDocument code.
 Package caption Info: hyperref package is loaded.
+Package caption Info: rotating package is loaded.
 Package caption Info: End \AtBeginDocument code.
-Package hyperref Info: Link coloring OFF on input line 56.
+Package hyperref Info: Link coloring OFF on input line 59.
+ (rapport_resultats.out) (rapport_resultats.out)
 \@outlinefile=\write3
 \openout3 = `rapport_resultats.out'.
 
+LaTeX Font Info:    Trying to load font information for TS1+lmr on input line 9
+9.
+
+(C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/lm\ts1lmr.fd
+File: ts1lmr.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
+)
 LaTeX Font Info:    Trying to load font information for T1+lmtt on input line 9
-0.
- (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/lm\t1lmtt.fd
+9.
+
+(C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/lm\t1lmtt.fd
 File: t1lmtt.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
 Package microtype Info: Loading generic protrusion settings for font family
@@ -721,36 +760,36 @@ Package microtype Info: Character `029' is missing
 (microtype)             in font `T1/lmr/m/sc/10.95'.
 (microtype)             Ignoring protrusion settings for this character.
 LaTeX Font Info:    Trying to load font information for OT1+lmr on input line 9
-0.
+9.
 
 (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/lm\ot1lmr.fd
 File: ot1lmr.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
 LaTeX Font Info:    Trying to load font information for OML+lmm on input line 9
-0.
+9.
 
 (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/lm\omllmm.fd
 File: omllmm.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
 LaTeX Font Info:    Trying to load font information for OMS+lmsy on input line 
-90.
+99.
 
 (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/lm\omslmsy.fd
 File: omslmsy.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
 LaTeX Font Info:    Trying to load font information for OMX+lmex on input line 
-90.
+99.
 
 (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/lm\omxlmex.fd
 File: omxlmex.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <10.95> on input line 90.
+(Font)              <10.95> on input line 99.
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <8> on input line 90.
+(Font)              <8> on input line 99.
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <6> on input line 90.
-LaTeX Font Info:    Trying to load font information for U+msa on input line 90.
+(Font)              <6> on input line 99.
+LaTeX Font Info:    Trying to load font information for U+msa on input line 99.
 
 
 (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/amsfonts\umsa.fd
@@ -759,7 +798,7 @@ File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/microtype\mt-msa.cfg
 File: mt-msa.cfg 2006/02/04 v1.1 microtype config. file: AMS symbols (a) (RS)
 )
-LaTeX Font Info:    Trying to load font information for U+msb on input line 90.
+LaTeX Font Info:    Trying to load font information for U+msb on input line 99.
 
 
 (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/amsfonts\umsb.fd
@@ -768,13 +807,7 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 (C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/microtype\mt-msb.cfg
 File: mt-msb.cfg 2005/06/01 v1.0 microtype config. file: AMS symbols (b) (RS)
 )
-LaTeX Font Info:    Trying to load font information for TS1+lmr on input line 9
-0.
-
-(C:\Users\Miguel\AppData\Local\Programs\MiKTeX\tex/latex/lm\ts1lmr.fd
-File: ts1lmr.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
-)
-Overfull \hbox (51.57985pt too wide) detected at line 122
+Overfull \hbox (51.57985pt too wide) detected at line 134
 [][][]\OML/lmm/m/it/10.95 '[]\OT1/lmr/m/n/10.95 (\OML/lmm/m/it/10.95 x\OT1/lmr/
 m/n/10.95 ) = [] + []
  []
@@ -782,266 +815,217 @@ m/n/10.95 ) = [] + []
 
 Underfull \vbox (badness 10000) has occurred while \output is active []
 
-LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <10> on input line 150.
-LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <7> on input line 150.
-LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <5> on input line 150.
  [1{C:/Users/Miguel/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}{C:/Users/
 Miguel/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-ec.enc}{C:/Users/Mig
-uel/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-mathit.enc}{C:/Users/Mi
-guel/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-rm.enc}{C:/Users/Migue
-l/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-ts1.enc}
+uel/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-ts1.enc}{C:/Users/Migue
+l/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-mathit.enc}{C:/Users/Migu
+el/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-rm.enc}{C:/Users/Miguel/
+AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-mathsy.enc}
 
 
-{C:/Users/Miguel/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-mathsy.enc
-}{C:/Users/Miguel/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-mathex.en
-c}]
+{C:/Users/Miguel/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-mathex.enc
+}]
+LaTeX Font Info:    External font `lmex10' loaded for size
+(Font)              <10> on input line 163.
+LaTeX Font Info:    External font `lmex10' loaded for size
+(Font)              <7> on input line 163.
+LaTeX Font Info:    External font `lmex10' loaded for size
+(Font)              <5> on input line 163.
 
-LaTeX Warning: Reference `tab:hp' on page 2 undefined on input line 169.
-
-
-Overfull \hbox (15.90814pt too wide) in paragraph at lines 179--194
+Overfull \hbox (15.90814pt too wide) in paragraph at lines 192--207
  [][] 
  []
 
-<figures/training_curves.png, id=31, 2810.5pt x 1204.5pt>
+<figures/training_curves.png, id=163, 2810.5pt x 1204.5pt>
 File: figures/training_curves.png Graphic file (type png)
 <use figures/training_curves.png>
-Package pdftex.def Info: figures/training_curves.png  used on input line 216.
+Package pdftex.def Info: figures/training_curves.png  used on input line 228.
 (pdftex.def)             Requested size: 495.07779pt x 212.1691pt.
-
-LaTeX Warning: Reference `eq:loss' on page 2 undefined on input line 220.
-
-
-LaTeX Warning: Reference `eq:loss' on page 2 undefined on input line 220.
-
-
-LaTeX Warning: Reference `fig:training' on page 2 undefined on input line 224.
-
-<figures/loss_curves.png, id=33, 2810.5pt x 1204.5pt>
+<figures/loss_curves.png, id=168, 2810.5pt x 1204.5pt>
 File: figures/loss_curves.png Graphic file (type png)
 <use figures/loss_curves.png>
-Package pdftex.def Info: figures/loss_curves.png  used on input line 247.
+Package pdftex.def Info: figures/loss_curves.png  used on input line 258.
 (pdftex.def)             Requested size: 495.07779pt x 212.1691pt.
-
-LaTeX Warning: Reference `fig:loss' on page 2 undefined on input line 255.
-
-<figures/val_metrics.png, id=34, 2810.5pt x 1204.5pt>
+<figures/val_metrics.png, id=170, 2810.5pt x 1204.5pt>
 File: figures/val_metrics.png Graphic file (type png)
 <use figures/val_metrics.png>
-Package pdftex.def Info: figures/val_metrics.png  used on input line 267.
+Package pdftex.def Info: figures/val_metrics.png  used on input line 279.
 (pdftex.def)             Requested size: 495.07779pt x 212.1691pt.
-
-LaTeX Warning: Reference `fig:valmetrics' on page 2 undefined on input line 276
-.
-
-<figures/roc_pr_comparison.png, id=35, 2810.5pt x 1204.5pt>
+[2] [3 <./figures/training_curves.png> <./figures/loss_curves.png>]
+<figures/roc_pr_comparison.png, id=195, 2810.5pt x 1204.5pt>
 File: figures/roc_pr_comparison.png Graphic file (type png)
 <use figures/roc_pr_comparison.png>
-Package pdftex.def Info: figures/roc_pr_comparison.png  used on input line 290.
+Package pdftex.def Info: figures/roc_pr_comparison.png  used on input line 303.
 
 (pdftex.def)             Requested size: 495.07779pt x 212.1691pt.
-
-LaTeX Warning: Reference `fig:rocpr' on page 2 undefined on input line 297.
-
-[2]
-<figures/metrics_table.png, id=57, 2810.5pt x 1204.5pt>
+<figures/metrics_table.png, id=201, 2810.5pt x 1204.5pt>
 File: figures/metrics_table.png Graphic file (type png)
 <use figures/metrics_table.png>
-Package pdftex.def Info: figures/metrics_table.png  used on input line 308.
+Package pdftex.def Info: figures/metrics_table.png  used on input line 324.
 (pdftex.def)             Requested size: 237.58047pt x 101.8022pt.
 Package microtype Info: Character `029' is missing
 (microtype)             in font `T1/lmr/m/sc/10'.
 (microtype)             Ignoring protrusion settings for this character.
 
-
-LaTeX Warning: Citation `azamuke2025' on page 3 undefined on input line 336.
-
-
-Overfull \hbox (35.99782pt too wide) in paragraph at lines 322--339
+Overfull \hbox (15.26552pt too wide) in paragraph at lines 342--359
  [][] 
  []
 
 
-LaTeX Warning: Citation `azamuke2025' on page 3 undefined on input line 344.
+Underfull \vbox (badness 6032) has occurred while \output is active []
 
-
-LaTeX Warning: Reference `sec:decision' on page 3 undefined on input line 360.
-
-<figures/confusion_matrix.png, id=58, 1806.75pt x 1003.75pt>
+<figures/confusion_matrix.png, id=208, 1806.75pt x 1003.75pt>
 File: figures/confusion_matrix.png Graphic file (type png)
 <use figures/confusion_matrix.png>
-Package pdftex.def Info: figures/confusion_matrix.png  used on input line 366.
+Package pdftex.def Info: figures/confusion_matrix.png  used on input line 382.
 (pdftex.def)             Requested size: 194.81772pt x 108.22266pt.
 
 Underfull \vbox (badness 10000) has occurred while \output is active []
 
- [3 <./figures/training_curves.png> <./figures/metrics_table.png>]
-Overfull \hbox (38.01895pt too wide) detected at line 377
+ [4 <./figures/val_metrics.png> <./figures/metrics_table.png>]
+Overfull \hbox (38.01895pt too wide) detected at line 396
 [] \OT1/lmr/m/n/10.95 = [] = 0\OML/lmm/m/it/10.95 :\OT1/lmr/m/n/10.95 968\OML/l
 mm/m/it/10.95 ;  [] \OT1/lmr/m/n/10.95 = [] = 0\OML/lmm/m/it/10.95 :\OT1/lmr/m/
 n/10.95 936
  []
 
-
-LaTeX Warning: Citation `cobac2018' on page 4 undefined on input line 384.
-
-<figures/regularization.png, id=70, 2810.5pt x 1204.5pt>
+<figures/regularization.png, id=221, 2810.5pt x 1204.5pt>
 File: figures/regularization.png Graphic file (type png)
 <use figures/regularization.png>
-Package pdftex.def Info: figures/regularization.png  used on input line 394.
+Package pdftex.def Info: figures/regularization.png  used on input line 410.
 (pdftex.def)             Requested size: 237.58047pt x 101.8022pt.
 
 Underfull \vbox (badness 10000) has occurred while \output is active []
 
-
-
-LaTeX Warning: Reference `fig:reg' on page 4 undefined on input line 402.
-
-
-LaTeX Warning: Reference `eq:loss' on page 4 undefined on input line 403.
-
-<figures/pruning_summary.png, id=71, 1806.75pt x 1003.75pt>
+<figures/pruning_summary.png, id=224, 1806.75pt x 1003.75pt>
 File: figures/pruning_summary.png Graphic file (type png)
 <use figures/pruning_summary.png>
-Package pdftex.def Info: figures/pruning_summary.png  used on input line 420.
+Package pdftex.def Info: figures/pruning_summary.png  used on input line 430.
 (pdftex.def)             Requested size: 209.07198pt x 116.141pt.
-[4 <./figures/loss_curves.png> <./figures/confusion_matrix.png> <./figures/regu
-larization.png>]
-Overfull \hbox (12.7314pt too wide) in paragraph at lines 433--446
+
+Underfull \vbox (badness 10000) has occurred while \output is active []
+
+ [5 <./figures/roc_pr_comparison.png> <./figures/confusion_matrix.png> <./figur
+es/regularization.png>]
+Overfull \hbox (12.7314pt too wide) in paragraph at lines 448--461
  [][] 
  []
 
-
-LaTeX Warning: Reference `tab:pruning' on page 5 undefined on input line 450.
-
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <12> on input line 461.
+(Font)              <12> on input line 473.
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 461.
-
-
-Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\varphi' on input line 461.
+(hyperref)                removing `math shift' on input line 473.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `subscript' on input line 461.
+(hyperref)                removing `\varphi' on input line 473.
 
 
 Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `math shift' on input line 461.
+(hyperref)                removing `subscript' on input line 473.
 
-<figures/edge_functions_forget.png, id=87, 2810.5pt x 1204.5pt>
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 473.
+
+<figures/edge_functions_forget.png, id=235, 2810.5pt x 1204.5pt>
 File: figures/edge_functions_forget.png Graphic file (type png)
 <use figures/edge_functions_forget.png>
 Package pdftex.def Info: figures/edge_functions_forget.png  used on input line 
-466.
-(pdftex.def)             Requested size: 242.59084pt x 103.95256pt.
-<figures/edge_functions_input.png, id=88, 2810.5pt x 1204.5pt>
+481.
+(pdftex.def)             Requested size: 237.63522pt x 101.83896pt.
+<figures/edge_functions_input.png, id=236, 2810.5pt x 1204.5pt>
 File: figures/edge_functions_input.png Graphic file (type png)
 <use figures/edge_functions_input.png>
 Package pdftex.def Info: figures/edge_functions_input.png  used on input line 4
-70.
-(pdftex.def)             Requested size: 242.59084pt x 103.95256pt.
-<figures/edge_functions_candidate.png, id=89, 2810.5pt x 1204.5pt>
+88.
+(pdftex.def)             Requested size: 237.63522pt x 101.83896pt.
+<figures/edge_functions_candidate.png, id=237, 2810.5pt x 1204.5pt>
 File: figures/edge_functions_candidate.png Graphic file (type png)
 <use figures/edge_functions_candidate.png>
 Package pdftex.def Info: figures/edge_functions_candidate.png  used on input li
-ne 474.
-(pdftex.def)             Requested size: 242.59084pt x 103.95256pt.
-<figures/edge_functions_output.png, id=90, 2810.5pt x 1204.5pt>
+ne 500.
+(pdftex.def)             Requested size: 237.63522pt x 101.83896pt.
+<figures/edge_functions_output.png, id=238, 2810.5pt x 1204.5pt>
 File: figures/edge_functions_output.png Graphic file (type png)
 <use figures/edge_functions_output.png>
 Package pdftex.def Info: figures/edge_functions_output.png  used on input line 
-478.
-(pdftex.def)             Requested size: 242.59084pt x 103.95256pt.
-
-LaTeX Warning: Reference `eq:phi' on page 5 undefined on input line 485.
-
-
-LaTeX Warning: Reference `eq:phi' on page 5 undefined on input line 485.
-
-
-LaTeX Warning: Reference `fig:edgefuncs' on page 5 undefined on input line 489.
-
-
-
-Underfull \hbox (badness 1337) in paragraph at lines 493--498
- []\T1/lmr/bx/n/10.95 (+20) Porte For-get.[] \T1/lmr/m/n/10.95 (+20) L'arête \T
-1/lmtt/m/n/10.95 rho_nouveau$\OMS/lmsy/m/n/10.95 ! \OML/lmm/m/it/10.95 h[]$
- []
-
-<figures/heatmap_forget.png, id=91, 1806.75pt x 1003.75pt>
+508.
+(pdftex.def)             Requested size: 237.63522pt x 101.83896pt.
+<figures/heatmap_forget.png, id=246, 1806.75pt x 1003.75pt>
 File: figures/heatmap_forget.png Graphic file (type png)
 <use figures/heatmap_forget.png>
-Package pdftex.def Info: figures/heatmap_forget.png  used on input line 512.
+Package pdftex.def Info: figures/heatmap_forget.png  used on input line 542.
 (pdftex.def)             Requested size: 242.59084pt x 134.76523pt.
-<figures/heatmap_input.png, id=92, 1806.75pt x 1003.75pt>
+<figures/heatmap_input.png, id=247, 1806.75pt x 1003.75pt>
 File: figures/heatmap_input.png Graphic file (type png)
 <use figures/heatmap_input.png>
-Package pdftex.def Info: figures/heatmap_input.png  used on input line 516.
+Package pdftex.def Info: figures/heatmap_input.png  used on input line 548.
 (pdftex.def)             Requested size: 242.59084pt x 134.76523pt.
-<figures/heatmap_candidate.png, id=93, 1806.75pt x 1003.75pt>
+<figures/heatmap_candidate.png, id=248, 1806.75pt x 1003.75pt>
 File: figures/heatmap_candidate.png Graphic file (type png)
 <use figures/heatmap_candidate.png>
-Package pdftex.def Info: figures/heatmap_candidate.png  used on input line 520.
+Package pdftex.def Info: figures/heatmap_candidate.png  used on input line 554.
 
 (pdftex.def)             Requested size: 242.59084pt x 134.76523pt.
-<figures/heatmap_output.png, id=94, 1806.75pt x 1003.75pt>
+<figures/heatmap_output.png, id=249, 1806.75pt x 1003.75pt>
 File: figures/heatmap_output.png Graphic file (type png)
 <use figures/heatmap_output.png>
-Package pdftex.def Info: figures/heatmap_output.png  used on input line 524.
+Package pdftex.def Info: figures/heatmap_output.png  used on input line 561.
 (pdftex.def)             Requested size: 242.59084pt x 134.76523pt.
 
-LaTeX Warning: Reference `fig:heatmaps' on page 5 undefined on input line 535.
+Underfull \hbox (badness 1406) in paragraph at lines 564--564
+[]\T1/lmr/m/n/10 (+20) (d) |Porte \T1/lmr/bx/n/10 (+20) Out-put \T1/lmr/m/n/10 
+(+20) ^^V dis-tri-bu-tion dif-fuse (echelle
+ []
 
-[5 <./figures/val_metrics.png> <./figures/pruning_summary.png>]
-<figures/drift_by_feature.png, id=113, 1806.75pt x 1003.75pt>
+
+Underfull \hbox (badness 10000) in paragraph at lines 578--584
+[]\T1/lmr/m/n/10.95 (+20) Les heat-maps (fi-gure []10[]) re-velent que
+ []
+
+[6 <./figures/pruning_summary.png>] [7 <./figures/edge_functions_forget.png> <.
+/figures/edge_functions_input.png> <./figures/edge_functions_candidate.png> <./
+figures/edge_functions_output.png>] [8 <./figures/heatmap_forget.png> <./figure
+s/heatmap_input.png> <./figures/heatmap_candidate.png> <./figures/heatmap_outpu
+t.png>]
+<figures/drift_by_feature.png, id=283, 1806.75pt x 1003.75pt>
 File: figures/drift_by_feature.png Graphic file (type png)
 <use figures/drift_by_feature.png>
-Package pdftex.def Info: figures/drift_by_feature.png  used on input line 550.
+Package pdftex.def Info: figures/drift_by_feature.png  used on input line 592.
 (pdftex.def)             Requested size: 237.58047pt x 131.97772pt.
 
-Overfull \hbox (20.11516pt too wide) in paragraph at lines 565--577
+Overfull \hbox (20.11516pt too wide) in paragraph at lines 610--622
  [][] 
  []
 
+[9
 
-Underfull \vbox (badness 10000) has occurred while \output is active []
-
-<figures/symbolic_report.png, id=114, 2810.5pt x 1204.5pt>
+ <./figures/drift_by_feature.png>]
+<figures/symbolic_report.png, id=295, 2810.5pt x 1204.5pt>
 File: figures/symbolic_report.png Graphic file (type png)
 <use figures/symbolic_report.png>
-Package pdftex.def Info: figures/symbolic_report.png  used on input line 593.
-(pdftex.def)             Requested size: 237.58047pt x 101.8022pt.
+Package pdftex.def Info: figures/symbolic_report.png  used on input line 640.
+(pdftex.def)             Requested size: 705.45367pt x 302.33728pt.
 
-Underfull \vbox (badness 10000) has occurred while \output is active []
+Overfull \hbox (944.63205pt too wide) has occurred while \output is active
+[] []|[] []
+ []
 
- [6 <./figures/roc_pr_comparison.png> <./figures/drift_by_feature.png>]
-<figures/decision_explanation.png, id=125, 1806.75pt x 1003.75pt>
+[10
+
+
+
+ <./figures/symbolic_report.png>]
+<figures/decision_explanation.png, id=305, 1806.75pt x 1003.75pt>
 File: figures/decision_explanation.png Graphic file (type png)
 <use figures/decision_explanation.png>
 Package pdftex.def Info: figures/decision_explanation.png  used on input line 6
-24.
+70.
 (pdftex.def)             Requested size: 237.58047pt x 131.97772pt.
 
-
-LaTeX Warning: Reference `fig:decision' on page 7 undefined on input line 631.
-
-[7 <./figures/edge_functions_forget.png> <./figures/edge_functions_input.png> <
-./figures/edge_functions_candidate.png> <./figures/edge_functions_output.png> <
-./figures/symbolic_report.png> <./figures/decision_explanation.png>]
-Underfull \hbox (badness 4846) in paragraph at lines 637--639
- []\T1/lmr/bx/n/10.95 (+20) Transaction ana-ly-sée.[] \T1/lmr/m/n/10.95 (+20) S
-core de risque :
- []
-
-
-Overfull \hbox (81.33774pt too wide) detected at line 645
+Overfull \hbox (81.33774pt too wide) detected at line 693
 \OT1/lmr/m/n/10.95 ^^A([])[]0\OML/lmm/m/it/10.95 :\OT1/lmr/m/n/10.95 149\OML/lm
 m/m/it/10.95 ;   \OT1/lmr/m/n/10.95 ^^A([])[]0\OML/lmm/m/it/10.95 :\OT1/lmr/m/n
 /10.95 124\OML/lmm/m/it/10.95 ;   \OT1/lmr/m/n/10.95 ^^A([])[]0\OML/lmm/m/it/10
@@ -1049,63 +1033,112 @@ m/m/it/10.95 ;   \OT1/lmr/m/n/10.95 ^^A([])[]0\OML/lmm/m/it/10.95 :\OT1/lmr/m/n
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 655--660
- []\T1/lmr/bx/n/10.95 (+20) Valeur ré-gle-men-taire.[] \T1/lmr/m/n/10.95 (+20) 
+Underfull \hbox (badness 10000) in paragraph at lines 702--706
+ []\T1/lmr/bx/n/10.95 (+20) Valeur re-gle-men-taire.[] \T1/lmr/m/n/10.95 (+20) 
 Ces contri-bu-tions
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 655--660
-\T1/lmr/m/n/10.95 (+20) mé-tier com-pré-hen-sibles (\T1/lmtt/m/n/10.95 rho_nouv
-eau\T1/lmr/m/n/10.95 (+20) , \T1/lmtt/m/n/10.95 v1h\T1/lmr/m/n/10.95 (+20) ,
+Underfull \hbox (badness 6859) in paragraph at lines 725--727
+[]\T1/lmr/bx/n/10.95 (+20) Forget \T1/lmr/m/n/10.95 (+20) : rei-ni-tia-lise la 
+me-moire sur
  []
 
 
-LaTeX Warning: Citation `azamuke2025' on page 8 undefined on input line 671.
+Underfull \hbox (badness 4254) in paragraph at lines 727--730
+[]\T1/lmr/bx/n/10.95 (+20) Input \T1/lmr/m/n/10.95 (+20) : n'ecrit en me-moire 
+que sur
+ []
 
-[8 <./figures/heatmap_forget.png> <./figures/heatmap_input.png> <./figures/heat
-map_candidate.png> <./figures/heatmap_output.png>]
-Underfull \hbox (badness 10000) in paragraph at lines 713--717
-[]\T1/lmr/m/n/10.95 (+20) COBAC (2018). \T1/lmr/m/it/10.95 (+20) Rè-gle-ment
+[11
+
+
+ <./figures/decision_explanation.png>]
+Underfull \hbox (badness 10000) in paragraph at lines 764--767
+ []\T1/lmr/bx/n/10.95 (+20) Interpretabilite struc-tu-relle.[] \T1/lmr/m/n/10.9
+5 (+20) 93.6% des
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 713--717
-\T1/lmr/m/it/10.95 (+20) N\TS1/lmr/m/it/10.95 (+20) °\T1/lmr/m/it/10.95 (+20) 0
-4/18/CEMAC/UMAC/COBAC re-la-
+Underfull \hbox (badness 10000) in paragraph at lines 773--776
+ []\T1/lmr/bx/n/10.95 (+20) Conformite CO-BAC.[] \T1/lmr/m/n/10.95 (+20) Mo-dul
+e d'ex-pli-
  []
 
-[9
 
-] (rapport_resultats.aux)
+Underfull \hbox (badness 10000) in paragraph at lines 773--776
+\T1/lmr/m/n/10.95 (+20) ca-tion par contri-bu-tions ad-di-tives : rap-
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 773--776
+\T1/lmr/m/n/10.95 (+20) port au-di-table conforme au Re-gle-ment
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 773--776
+\T1/lmr/m/n/10.95 (+20) N$[]$04/18/CEMAC/UMAC/COBAC [[]], jus-
+ []
+
+
+Underfull \hbox (badness 1005) in paragraph at lines 782--786
+\T1/lmr/m/n/10.95 (+20) tions de chaque compte (TTL 24h, cle
+ []
+
+
+Underfull \hbox (badness 6978) in paragraph at lines 787--792
+[]\T1/lmr/bx/n/10.95 (+20) Inference CPU (MKA-NIn-fe-rence).
+ []
+
+
+Underfull \hbox (badness 2285) in paragraph at lines 793--799
+\T1/lmr/m/n/10.95 (+20) temps reel af-fi-chant : jauge de risque
+ []
+
+
+Underfull \hbox (badness 2103) in paragraph at lines 823--826
+[]\T1/lmr/m/n/10.95 (+20) A. Bo-zor-gasl et H. Chen (2024). \T1/lmr/m/it/10.95 
+(+20) Wav-
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 833--837
+[]\T1/lmr/m/n/10.95 (+20) COBAC (2018). \T1/lmr/m/it/10.95 (+20) Re-gle-ment
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 833--837
+\T1/lmr/m/it/10.95 (+20) N$[]$04/18/CEMAC/UMAC/COBAC re-
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 854--857
+[]\T1/lmr/m/n/10.95 (+20) Z. Li (2024). \T1/lmr/m/it/10.95 (+20) Fast-KAN : Ver
+y
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 854--857
+\T1/lmr/m/it/10.95 (+20) Fast Kolmogorov-Arnold Net-works\T1/lmr/m/n/10.95 (+20
+) .
+ []
+
+[12] (rapport_resultats.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2025-12-24>
  ***********
-
-
-LaTeX Warning: There were undefined references.
-
-
-LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
-
-
-Package rerunfilecheck Warning: File `rapport_resultats.out' has changed.
-(rerunfilecheck)                Rerun to get outlines right
-(rerunfilecheck)                or use package `bookmark'.
-
-Package rerunfilecheck Info: Checksums for `rapport_resultats.out':
-(rerunfilecheck)             Before: <no file>
-(rerunfilecheck)             After:  392F8B24EA377A26750D33D43A78FD1E;5012.
+Package rerunfilecheck Info: File `rapport_resultats.out' has not changed.
+(rerunfilecheck)             Checksum: 072BEBBE3E2E26F9195AFCDA0F96B38F;6482.
  ) 
 Here is how much of TeX's memory you used:
- 18037 strings out of 467871
- 299669 string characters out of 5417892
- 759626 words of memory out of 5000000
- 46320 multiletter control sequences out of 15000+600000
- 740962 words of font info for 243 fonts, out of 8000000 for 9000
+ 18386 strings out of 467871
+ 306374 string characters out of 5417892
+ 767063 words of memory out of 5000000
+ 46575 multiletter control sequences out of 15000+600000
+ 743087 words of font info for 269 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 75i,14n,79p,1016b,559s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 75i,14n,79p,1016b,631s stack positions out of 10000i,1000n,20000p,200000b,200000s
 <C:/Users/Miguel/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmbx10.p
 fb><C:/Users/Miguel/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmbx12.
 pfb><C:/Users/Miguel/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmcsc1
@@ -1126,9 +1159,9 @@ y10.pfb><C:/Users/Miguel/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lm
 sy7.pfb><C:/Users/Miguel/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lm
 sy8.pfb><C:/Users/Miguel/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lm
 tt10.pfb>
-Output written on rapport_resultats.pdf (9 pages, 2783806 bytes).
+Output written on rapport_resultats.pdf (12 pages, 2811735 bytes).
 PDF statistics:
- 285 PDF objects out of 1000 (max. 8388607)
- 76 named destinations out of 1000 (max. 500000)
- 65632 words of extra memory for PDF output out of 74296 (max. 10000000)
+ 453 PDF objects out of 1000 (max. 8388607)
+ 91 named destinations out of 1000 (max. 500000)
+ 63816 words of extra memory for PDF output out of 74296 (max. 10000000)
 

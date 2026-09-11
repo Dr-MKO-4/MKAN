@@ -1,29 +1,29 @@
 % ============================================================
 %  rapport_resultats.tex
-%  Résultats expérimentaux  modèle MKAN pour la détection
-%  de fraude temps-réel dans les paiements Mobile Money CEMAC
-%  Mémoire de Master  ENSPD / Université de Douala
+%  Resultats experimentaux -- modele MKAN pour la detection
+%  de fraude temps-reel dans les paiements Mobile Money CEMAC
+%  Memoire de Master -- ENSPD / Universite de Douala
 %  Auteur : Georges Miguel Moukoko Ekambi
 % ============================================================
 \documentclass[11pt,a4paper,twocolumn]{article}
 
-% ── Encodage & langue ─────────────────────────────────────
+% Encodage & langue
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage[french]{babel}
 \usepackage{lmodern}
 \usepackage{microtype}
 
-% ── Mise en page ──────────────────────────────────────────
+% Mise en page
 \usepackage[top=2.2cm,bottom=2.2cm,left=1.8cm,right=1.8cm,
             columnsep=0.7cm]{geometry}
 \usepackage{setspace}
 
-% ── Mathématiques ─────────────────────────────────────────
+% Mathematiques
 \usepackage{amsmath,amssymb,bm}
 \usepackage{mathtools}
 
-% ── Figures & tableaux ────────────────────────────────────
+% Figures & tableaux
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{array}
@@ -35,8 +35,11 @@
 \usepackage{subcaption}
 \usepackage[hidelinks]{hyperref}
 \usepackage{dblfloatfix}   % figures pleine largeur en two-column
+\usepackage{rotating}      % sidewaysfigure pour figures paysage
+\usepackage{pdflscape}     % page paysage dans le PDF
+\usepackage{placeins}      % FloatBarrier : contient les flottants par section
 
-% ── Couleurs thématiques ──────────────────────────────────
+% Couleurs thematiques
 \definecolor{mkanblue}{HTML}{2196F3}
 \definecolor{lstmorange}{HTML}{FF9800}
 \definecolor{xgbgreen}{HTML}{4CAF50}
@@ -44,7 +47,7 @@
 \definecolor{lightgray}{HTML}{F3F4F6}
 \definecolor{cobacgold}{HTML}{B8860B}
 
-% ── Macros ────────────────────────────────────────────────
+% Macros
 \newcommand{\MKAN}{\textsc{mkan}}
 \newcommand{\eg}{\textit{e.g.},~}
 \newcommand{\ie}{\textit{i.e.},~}
@@ -52,78 +55,87 @@
 \newcommand{\phiij}{\varphi_{ij}}
 \newcommand{\figdir}{figures/}
 
-% ─────────────────────────────────────────────────────────
+% 
 \begin{document}
 
-% ── Titre ─────────────────────────────────────────────────
+% Titre
 \twocolumn[{%
 \begin{center}
-{\large\bfseries Détection temps-réel de la fraude dans les paiements Mobile Money\\[2pt]
-de la zone CEMAC par réseaux de Kolmogorov-Arnold à mémoire (MKAN)}\\[1.2em]
-{\normalsize Georges Miguel Moukoko Ekambi\\
-École Nationale Supérieure Polytechnique de Douala (ENSPD)  Université de Douala, Cameroun\\
+{\large\bfseries Detection temps-reel de la fraude dans les paiements Mobile Money\\[2pt]
+de la zone CEMAC par reseaux de Kolmogorov-Arnold a memoire (MKAN)}\\[1.2em]
+{\normalsize
+\textbf{Auteur~:} Georges Miguel Moukoko Ekambi\\[0.25em]
+\textit{Co-encadreurs~:}
+Prof.\ Dr.\ habil.\ P.\ Njionou Sadjang, Professeur Associe, ENSPD
+\&
+Dr.\ Kenmoe, Charge de Cours, FSEGA -- Departement de Techniques Quantitatives\\[0.3em]
+Laboratoire de Genie Informatique, Sciences des Donnees et Intelligence Artificielle\\
+Ecole Nationale Superieure Polytechnique de Douala \textbullet{} Universite de Douala\\
 \texttt{georgesmoukoko4@gmail.com}}\\[1em]
 \rule{\linewidth}{0.4pt}
 \end{center}
 
-% ── Résumé ────────────────────────────────────────────────
-\begin{center}\textbf{Résumé}\end{center}
+% Resume
+\begin{center}\textbf{Resume}\end{center}
 \noindent
-Ce rapport présente les résultats expérimentaux du modèle \MKAN{}
+Ce rapport presente les resultats experimentaux du modele \MKAN{}
 (\emph{Memory Kolmogorov-Arnold Network}), une architecture hybride
-combinant les portes LSTM avec des fonctions d'activation à arêtes
-apprises (FastKAN + KAN-AD) pour la détection de fraude dans les
-paiements Mobile Money de la zone CEMAC. Entraîné sur 1,75~million
-de fenêtres temporelles ($W=10$) extraites du simulateur MoMTSim,
-\MKAN{} atteint un MCC de $0.9268$ et une AUC-ROC de $0.9806$ sur
-le jeu de test, surpassant de $+12.8$ points le meilleur modèle de
-la littérature sub-saharienne. La régularisation L1+entropie réduit
-$93.6\,\%$ des connexions, produisant un réseau auditable à 114~arêtes
-actives documentées par régression symbolique  condition requise par
-le Règlement COBAC N°04/18/CEMAC/UMAC.
+combinant les portes LSTM avec des fonctions d'activation a aretes
+apprises (FastKAN + KAN-AD) pour la detection de fraude dans les
+paiements Mobile Money de la zone CEMAC. Entraine sur 1\,749\,109~fenetres temporelles ($W=10$) extraites
+du simulateur MoMTSim \cite{lopez2022momtsim}, \MKAN{} atteint un MCC de $0.9268$
+et une AUC-ROC de $0.9806$ sur le jeu de test, surpassant de
+$+12.8$~points le meilleur modele de la litterature sub-saharienne
+\cite{azamuke2025}. La regularisation L1+entropie reduit $93.6\,\%$
+des connexions, produisant un reseau auditable a 114~aretes actives
+documentees par regression symbolique \textemdash{} condition requise par le
+Reglement COBAC N$^{\circ}$04/18/CEMAC/UMAC \cite{cobac2018}.
 \smallskip
 
-\noindent\textbf{Mots-clés~:}
-Détection de fraude ; Kolmogorov-Arnold Networks ; LSTM ; Mobile Money ;
-CEMAC ; auditabilité algorithmique ; COBAC ; dérive conceptuelle.\\[0.8em]
+\noindent\textbf{Mots-cles~:}
+Detection de fraude ; Kolmogorov-Arnold Networks ; LSTM ; Mobile Money ;
+CEMAC ; auditabilite algorithmique ; COBAC ; derive conceptuelle.\\[0.8em]
 \rule{\linewidth}{0.4pt}\vspace{1em}
 }]
 
-% ═══════════════════════════════════════════════════════════
+% =========================================================
 \section{Introduction}
-% ═══════════════════════════════════════════════════════════
+% =========================================================
 
 L'expansion des paiements Mobile Money dans la zone CEMAC (Cameroun,
-Congo, Gabon, Guinée équatoriale, RCA, Tchad) s'accompagne d'une
+Congo, Gabon, Guinee equatoriale, RCA, Tchad) s'accompagne d'une
 augmentation des tentatives de fraude~: ATO (\textit{Account Takeover}),
-remboursements frauduleux, fausses créances, dépôt fractionné et
-smurfing. Le Règlement COBAC N°04/18/CEMAC/UMAC/COBAC impose que
-toute décision algorithmique à impact financier soit justifiable et
-auditable, ce qui exclut les modèles boîte-noire classiques.
+remboursements frauduleux, fausses creances, depot fractionne et
+smurfing \cite{gsma2023}. Le Reglement COBAC N$^{\circ}$04/18/CEMAC/UMAC/COBAC
+\cite{cobac2018} impose que toute decision algorithmique a impact
+financier soit justifiable et auditable, ce qui exclut les modeles
+boite-noire classiques.
 
-L'architecture \MKAN{} répond à cette double contrainte performance/
-explicabilité~: elle intègre des fonctions d'activation à arêtes
-apprises (\textit{splines} hybrides Gaussiennes+Fourier) au sein des
-portes d'une cellule LSTM, permettant l'extraction symbolique
-post-élagage de chaque connexion active.
+L'architecture \MKAN{} repond a cette double contrainte performance/
+explicabilite~: elle integre des fonctions d'activation a aretes apprises
+(\textit{splines} hybrides Gaussiennes+Fourier) au sein des portes d'une
+cellule LSTM \cite{hochreiter1997}, permettant l'extraction symbolique
+post-elagage de chaque connexion active \cite{liu2024kan}.
 
-% ═══════════════════════════════════════════════════════════
-\section{Architecture et données expérimentales}
-% ═══════════════════════════════════════════════════════════
+% =========================================================
+\section{Architecture et donnees experimentales}
+% =========================================================
 
-\subsection{Fonction d'activation d'arête}
+\subsection{Fonction d'activation d'arete}
 
-La couche hybride \textsc{HybridKAN} calcule, pour chaque arête
-$(i \to j)$, une fonction scalaire~:
+La couche hybride \textsc{HybridKAN} calcule, pour chaque arete
+$(i \to j)$, une fonction scalaire \cite{liu2024kan,li2024fastkan}~:
 \begin{equation}\label{eq:phi}
-  \phiij(x) = \underbrace{\sum_{m=1}^{M} w_m^G\,
+  \phiij(x) =
+  \underbrace{\sum_{m=1}^{M} w_m^G\,
     e^{-\|x-\mu_m\|^2 / 2h^2}}_{\text{FastKAN }(M=8)}
-  + \underbrace{\sum_{k=1}^{K}[a_k\cos(kx)+b_k\sin(kx)]}_{\text{KAN-AD }(K=2)}
+  +
+  \underbrace{\sum_{k=1}^{K}[a_k\cos(kx)+b_k\sin(kx)]}_{\text{KAN-AD }(K=2)}
 \end{equation}
-avec des centres $\mu_m$ partagés par grille, une largeur RBF $h$
+avec des centres $\mu_m$ partages par grille, une largeur RBF $h$
 et des harmoniques de Fourier d'ordre $k\in\{1,2\}$.
 
-\subsection{Perte régularisée}
+\subsection{Perte regularisee}
 
 La perte totale est~:
 \begin{equation}\label{eq:loss}
@@ -131,62 +143,63 @@ La perte totale est~:
   + \lambda\!\left(\mu_1 \!\sum_l \|\Phi_l\|_1
                  + \mu_2 \!\sum_l S(\Phi_l)\right)
 \end{equation}
-où $\ell_{\text{pred}}$ est la BCE pondérée par classe,
+ou $\ell_{\text{pred}}$ est la BCE ponderee par classe,
 $\|\Phi_l\|_1 = \sum_{ij}|\phiij|_1$ la norme L1 exacte
-(eq. 2.19 du mémoire) et $S(\Phi_l)$ l'entropie des contributions
-relatives des arêtes (section 4.3.3 du mémoire).
+(eq. 2.19 du memoire) et $S(\Phi_l)$ l'entropie des contributions
+relatives des aretes (section 4.3.3 du memoire).
 
-\subsection{Données expérimentales}
+\subsection{Donnees experimentales}
 
-Les données MoMTSim couvrent cinq scénarios de fraude.
-Les partitions utilisées sont~:
+Les donnees MoMTSim \cite{lopez2022momtsim} couvrent cinq scenarios
+de fraude (ATO, remboursement, fausse creance, smurfing, fractionnement).
+Les partitions sont presentees dans le tableau~\ref{tab:data}.
 
 \begin{table}[H]
 \centering
-\caption{Partitions du jeu de données MoMTSim.}
+\caption{Partitions du jeu de donnees MoMTSim.}
 \label{tab:data}
 \renewcommand{\arraystretch}{1.2}
 \small
 \begin{tabular}{lccc}
 \toprule
-\textbf{Partition} & \textbf{Graine} & \textbf{Fenêtres} & \textbf{Fraude} \\
+\textbf{Partition} & \textbf{Graine} & \textbf{Fenetres} & \textbf{Fraude} \\
 \midrule
-Entraînement & 1000 & 1\,749\,109 & 43.9\,\% \\
-Validation   & 1001 &   450\,955 & 34.6\,\% \\
-Test         & 1002 &   452\,349 & 34.6\,\% \\
+Entrainement & 1000 & 1\,749\,109 & 43.9\,\% \\
+Validation   & 1001 &   450\,955  & 34.6\,\% \\
+Test         & 1002 &   452\,349  & 34.6\,\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-% ═══════════════════════════════════════════════════════════
-\section{Recherche d'hyperparamètres}
-% ═══════════════════════════════════════════════════════════
+% =========================================================
+\section{Recherche d'hyperparametres}
+% =========================================================
 
-Une recherche heuristique est conduite sur les hyperparamètres
+Une recherche heuristique est conduite sur les hyperparametres
 structurels et d'optimisation de \MKAN{}, avec le MCC de validation
-comme critère de sélection. Chaque configuration est évaluée sur
-un sous-ensemble de 20\,000 fenêtres pour maîtriser le coût
-calculatoire. Le tableau~\ref{tab:hp} présente les hyperparamètres
+comme critere de selection. Chaque configuration est evaluee sur
+un sous-ensemble de 20\,000 fenetres pour maitriser le cout
+calculatoire. Le tableau~\ref{tab:hp} presente les hyperparametres
 optimaux retenus.
 
 \begin{table}[H]
 \centering
-\caption{Hyperparamètres optimaux issus de la recherche heuristique
+\caption{Hyperparametres optimaux issus de la recherche heuristique
          (MCC-val$\,= 0.9658$ au meilleur candidat).}
 \label{tab:hp}
 \renewcommand{\arraystretch}{1.2}
 \small
 \begin{tabular}{lcc}
 \toprule
-\textbf{Hyperparamètre} & \textbf{Notation} & \textbf{Valeur optimale} \\
+\textbf{Hyperparametre} & \textbf{Notation} & \textbf{Valeur optimale} \\
 \midrule
-Taille état caché    & $d_h$          & 16       \\
+Taille etat cache    & $d_h$          & 16       \\
 Centres gaussiens    & $M$            & 8        \\
 Ordre de Fourier     & $K$            & 2        \\
-Taille de fenêtre    & $W$            & 10       \\
+Taille de fenetre    & $W$            & 10       \\
 Taux d'apprentissage & $\eta$         & 0.003    \\
 Taille de mini-lot   & $B$            & 64       \\
-Régularisation glob. & $\lambda$      & $10^{-3}$\\
+Regularisation glob. & $\lambda$      & $10^{-3}$\\
 Poids norme L1       & $\mu_1$        & 1.0      \\
 Poids entropie       & $\mu_2$        & 0.5      \\
 \bottomrule
@@ -194,280 +207,248 @@ Poids entropie       & $\mu_2$        & 0.5      \\
 \end{table}
 
 \paragraph{Analyse des choix retenus.}
-La taille d'état caché $d_h=16$ offre le meilleur compromis
-entre capacité de représentation et sparsification effective~:
-$d_h=32$ augmente le MCC de moins de $0.3\,\%$ tout en doublant
-le nombre d'arêtes à élaguer. L'ordre de Fourier $K=2$ est
-suffisant pour capturer les periodicités intra-journalières
-des transactions frauduleuses (smurfing à fréquence régulière).
-Le taux d'apprentissage $\eta=0.003$ est trois fois supérieur
-à la valeur par défaut d'Adam ($10^{-3}$), cohérent avec
-l'utilisation d'une BCE pondérée dont les gradients sont
-naturellement atténués par les poids de classe.
+La taille d'etat cache $d_h=16$ offre le meilleur compromis entre
+capacite de representation et sparsification effective~: $d_h=32$
+augmente le MCC de moins de $0.3\,\%$ tout en doublant le nombre
+d'aretes a elaguer. L'ordre de Fourier $K=2$ capture les periodicites
+intra-journalieres du smurfing. Le taux d'apprentissage $\eta=0.003$
+est trois fois superieur a la valeur par defaut d'Adam
+\cite{kingma2014adam}, coherent avec une BCE ponderee dont les
+gradients sont naturellement attenues par les poids de classe.
 
-% ═══════════════════════════════════════════════════════════
+% =========================================================
+\FloatBarrier
 \section{Convergence et courbes d'apprentissage}
-% ═══════════════════════════════════════════════════════════
+% =========================================================
 
-\subsection{Tableau de bord d'entraînement}
+\subsection{Tableau de bord d'entrainement}
 
-\begin{figure*}[t]
+\begin{figure*}[tbp]
   \centering
   \includegraphics[width=\linewidth]{\figdir training_curves.png}
-  \caption{Tableau de bord complet de l'entraînement \MKAN{} sur 40~époques~:
-           perte totale (éq.~\ref{eq:loss}), composante prédictive $\ell_{\text{pred}}$,
-           norme L1, entropie $S$, MCC et AUC-ROC de validation.
-           Deux perturbations transitoires aux époques~20 et~29 marquent les
-           événements de \emph{Grid Extension}, où de nouveaux centres gaussiens sont
-           insérés dans la région de dérive de \texttt{var\_agent\_split}~;
-           le MCC se rétablit en 2–3~époques dans les deux cas.
-           L'étoile ($\star$) indique le \emph{checkpoint} sélectionné (époque~7,
-           MCC-val$\,{=}\,0.9544$).}
+  \caption{Tableau de bord complet de l'entrainement \MKAN{} sur 40~epoques~:
+           perte totale (eq.~\ref{eq:loss}), composante predictive
+           $\ell_{\text{pred}}$, norme L1, entropie $S$, MCC et AUC-ROC de
+           validation. Deux perturbations transitoires aux epoques~20 et~29
+           marquent les evenements de \emph{Grid Extension} declenches par
+           la derive de \texttt{var\_agent\_split} (JS$\,{=}\,0.051$)~;
+           le MCC se retablit en 2--3~epoques dans les deux cas.
+           ($\star$) indique le \emph{checkpoint} selectionne
+           (epoque~7, MCC-val$\,{=}\,0.9544$).}
   \label{fig:training}
 \end{figure*}
 
-La figure~\ref{fig:training} présente le tableau de bord complet
-de l'entraînement. La dynamique d'apprentissage se décompose
-en deux phases distinctes.
+La figure~\ref{fig:training} presente le tableau de bord complet.
+La dynamique d'apprentissage se decompose en deux phases.
 
-\paragraph{Phase 1  convergence rapide (époques 1–10).}
-La perte totale décroît de $0.278$ (époque~1) à un premier
-minimum local à l'époque~7, correspondant au \emph{checkpoint}
-retenu (MCC-val $= 0.9544$, AUC-ROC-val $= 0.9981$). Cette
-progression rapide témoigne de l'efficacité de l'optimiseur
-Adam avec $\eta=0.003$ sur des données fortement déséquilibrées.
+\paragraph{Phase 1 \textemdash{} convergence rapide (epoques 1--10).}
+La perte totale decreoit de $0.278$ a un premier minimum a
+l'epoque~7 (checkpoint retenu~: MCC-val$\,{=}\,0.9544$,
+AUC-ROC-val$\,{=}\,0.9981$).
 
-\paragraph{Phase 2  stabilisation régularisée (époques 11–40).}
-Le MCC oscille entre $0.92$ et $0.95$, typique de l'équilibrage
-entre $\mu_1\|\Phi\|_1$ (pression vers l'annulation des arêtes
-marginales) et $\mu_2 S$ (pression vers l'équirépartition).
-Les deux perturbations transitoires aux époques~20 et~29
-correspondent aux insertions de centres gaussiens (\emph{Grid
-Extension}) déclenchées par la dérive de \texttt{var\_agent\_split}.
+\paragraph{Phase 2 \textemdash{} stabilisation regularisee (epoques 11--40).}
+Le MCC oscille entre $0.92$ et $0.95$, avec deux perturbations
+transitoires aux epoques~20 et~29 correspondant aux insertions
+de centres gaussiens (\emph{Grid Extension}).
 
-\subsection{Décomposition de la perte}
+\subsection{Decomposition de la perte}
 
-\begin{figure*}[t]
+\begin{figure*}[tbp]
   \centering
   \includegraphics[width=\linewidth]{\figdir loss_curves.png}
-  \caption{Décomposition de la perte (échelle logarithmique)~:
+  \caption{Decomposition de la perte (echelle logarithmique)~:
            $\ell_{\text{total}}$ (courbe noire, $\approx\!0.28$),
-           $\ell_{\text{pred}}$ BCE pondérée (courbe bleue, $\approx\!0.064$)
-           et terme de régularisation $\lambda(\mu_1\|\Phi\|_1+\mu_2 S)$
-           (courbe rouge, $\approx\!0.21$).
-           La régularisation représente environ $75\,\%$ de la perte totale,
-           traduisant la priorité accordée à la sparsification sur la performance
-           discriminative brute.
-           Les pics des époques~20 et~29 correspondent exactement aux événements
-           de \emph{Grid Extension} et se résorbent en 2–3~époques.}
+           $\ell_{\text{pred}}$ BCE ponderee (courbe bleue, $\approx\!0.064$)
+           et terme de regularisation (courbe rouge, $\approx\!0.21$).
+           La regularisation represente environ $75\,\%$ de la perte totale~:
+           priorite a la sparsification sur la performance discriminative brute.
+           Les pics des epoques~20 et~29 correspondent aux evenements de
+           \emph{Grid Extension} et se resorbent en 2--3~epoques.}
   \label{fig:loss}
 \end{figure*}
 
-La figure~\ref{fig:loss} isole la composante prédictive
-$\ell_{\text{pred}}$, qui se stabilise autour de
-$0.062$–$0.064$ après l'époque~7. La différence entre
-$\ell_{\text{total}}$ et $\ell_{\text{pred}}$ représente
-le terme de régularisation $\lambda(\mu_1\|\Phi\|_1+\mu_2 S)$
-avec $\lambda=10^{-3}$, qui maintient une pression constante
-sans déstabiliser la convergence prédictive.
+La figure~\ref{fig:loss} isole $\ell_{\text{pred}}$, stabilisee
+autour de $0.062$--$0.064$ apres l'epoque~7. La regularisation
+$\lambda(\mu_1\|\Phi\|_1+\mu_2 S)$ maintient une pression constante
+sans deestabiliser la convergence predictive.
 
-\subsection{Évolution des métriques de validation}
+\subsection{Evolution des metriques de validation}
 
-\begin{figure*}[t]
+\begin{figure*}[tbp]
   \centering
   \includegraphics[width=\linewidth]{\figdir val_metrics.png}
-  \caption{Métriques de validation sur 40 époques~:
-           MCC (critère de sélection du \emph{checkpoint}),
+  \caption{Metriques de validation sur 40~epoques~:
+           MCC (critere de selection du \emph{checkpoint}),
            PR-AUC, AUC-ROC et score de Brier.
-           Le MCC culmine à $0.9544$ dès l'époque~7 et ne s'améliore
-           plus significativement~: la capacité discriminative est acquise
-           tôt, la régularisation prend ensuite le relais pour structurer
-           les arêtes.
-           Les zones grisées indiquent les oscillations liées
-           au rééquilibrage L1+entropie.}
+           Le MCC culmine a $0.9544$ des l'epoque~7 et ne s'ameliore
+           plus significativement~: la capacite discriminative est acquise
+           tot, la regularisation prend ensuite le relais.}
   \label{fig:valmetrics}
 \end{figure*}
 
-La figure~\ref{fig:valmetrics} révèle que le MCC de validation
-culmine à $\mathbf{0.9544}$ dès l'époque~7, justifiant la
-sélection précoce du \emph{checkpoint}. Le score de Brier
-($0.0186$ à l'époque~7) confirme une calibration probabiliste
-satisfaisante du score de risque.
+La figure~\ref{fig:valmetrics} revele que le MCC culmine a
+$\mathbf{0.9544}$ des l'epoque~7, justifiant la selection precoce.
+Le Brier ($0.0186$ a l'epoque~7) confirme une calibration
+probabiliste satisfaisante.
 
-% ═══════════════════════════════════════════════════════════
-\section{Évaluation comparative sur le jeu de test}
-% ═══════════════════════════════════════════════════════════
+% =========================================================
+\FloatBarrier
+\section{Evaluation comparative sur le jeu de test}
+% =========================================================
 
-\subsection{Courbes ROC et Précision-Rappel}
+\subsection{Courbes ROC et Precision-Rappel}
 
-\begin{figure*}[t]
+\begin{figure*}[tbp]
   \centering
   \includegraphics[width=\linewidth]{\figdir roc_pr_comparison.png}
-  \caption{Courbes ROC (gauche) et Précision-Rappel (droite)~:
-           \MKAN{} vs LSTM vs XGBoost sur 452\,349 fenêtres de test.
-           La courbe PR est prioritaire pour les jeux déséquilibrés~;
-           \MKAN{} maintient une précision supérieure à $95\,\%$
-           jusqu'à un rappel de $90\,\%$, ce qui est déterminant en
-           contexte opérationnel pour limiter les fausses alarmes
-           chez les agents BEAC.}
+  \caption{Courbes ROC (gauche) et Precision-Rappel (droite)~:
+           \MKAN{} vs LSTM \cite{hochreiter1997} vs
+           XGBoost \cite{chen2016xgboost} sur 452\,349~fenetres de test.
+           La courbe PR est prioritaire pour les jeux desequilibres~;
+           \MKAN{} maintient une precision superieure a $95\,\%$
+           jusqu'a un rappel de $90\,\%$, determinant pour limiter les
+           fausses alarmes chez les agents BEAC.}
   \label{fig:rocpr}
 \end{figure*}
 
-La figure~\ref{fig:rocpr} compare les trois modèles sur le
-jeu de test. \MKAN{} présente une AUC-ROC de $0.9806$ et une
+La figure~\ref{fig:rocpr} compare les trois modeles sur le
+jeu de test. \MKAN{} presente une AUC-ROC de $0.9806$ et une
 PR-AUC de $0.9782$. Les courbes PR montrent que \MKAN{} maintient
-une précision supérieure à $95\,\%$ jusqu'à un rappel de $90\,\%$,
-ce qui est déterminant en contexte opérationnel (limitation des
-fausses alarmes pour les agents BEAC).
+une precision superieure a $95\,\%$ jusqu'a un rappel de $90\,\%$,
+determinant pour limiter les fausses alarmes des agents BEAC.
 
-\subsection{Tableau comparatif des métriques}
+\subsection{Tableau comparatif des metriques}
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{\figdir metrics_table.png}
-  \caption{Métriques comparatives sur le jeu de test
-           (vert = meilleure valeur par colonne).
-           \MKAN{} se classe troisième sur les métriques pures~;
-           il est cependant le seul modèle capable de fournir une
-           décomposition auditable de chaque décision, condition
-           exigée par le COBAC.}
+  \caption{Metriques comparatives sur le jeu de test
+           (vert~= meilleure valeur par colonne).
+           \MKAN{} se classe troisieme sur les metriques pures
+           mais est le seul modele fournissant une decomposition
+           auditable de chaque decision, exigee par le COBAC
+           \cite{cobac2018}.}
   \label{fig:metricstable}
 \end{figure}
 
 \begin{table}[H]
 \centering
-\caption{Métriques de test (452\,349 fenêtres, $W=10$).
-         Baselines internes entraînés sur 20\,000 fenêtres.
-         $\uparrow$~: plus grand est mieux ; $\downarrow$~: plus petit est mieux.}
+\caption{Metriques de test (452\,349~fenetres, $W=10$).
+         $\uparrow$~: plus grand est mieux~;
+         $\downarrow$~: plus petit est mieux.}
 \label{tab:metrics}
 \renewcommand{\arraystretch}{1.3}
 \small
 \begin{tabular}{lcccc}
 \toprule
 \rowcolor{lightgray}
-\textbf{Modèle} & \textbf{MCC\,$\uparrow$} & \textbf{AUC\,$\uparrow$}
-  & \textbf{PR\,$\uparrow$} & \textbf{Brier\,$\downarrow$} \\
+\textbf{Modele} & \textbf{MCC$\uparrow$} & \textbf{AUC$\uparrow$}
+  & \textbf{PR$\uparrow$} & \textbf{Brier$\downarrow$} \\
 \midrule
 \rowcolor{mkanblue!12}
-\MKAN{} (proposé)  & 0.9268 & 0.9806 & 0.9782 & 0.0299 \\
-LSTM (baseline)    & 0.9749 & 0.9993 & 0.9987 & 0.0083 \\
-XGBoost (baseline) & \cellcolor{xgbgreen!20}0.9765
+\MKAN{} (propose)  & 0.9268 & 0.9806 & 0.9782 & 0.0299 \\
+LSTM               & 0.9749 & 0.9993 & 0.9987 & 0.0083 \\
+XGBoost            & \cellcolor{xgbgreen!20}0.9765
   & \cellcolor{xgbgreen!20}0.9994
   & \cellcolor{xgbgreen!20}0.9988
   & \cellcolor{xgbgreen!20}0.0102 \\
 \midrule
-XGBoost \cite{azamuke2025} & 0.82 & 0.97 &  &  \\
+XGBoost \cite{azamuke2025} & 0.82 & 0.97 & \textendash{} & \textendash{} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{Interprétation.}
-\textit{(i)~Gain sur la référence externe.}
-\MKAN{} surpasse de $+12.8$ points de MCC la meilleure
-référence sub-saharienne \cite{azamuke2025} sur un jeu de
-test plus difficile (34,6\,\% de fraude vs fractions
-inférieures dans la littérature).
+\paragraph{Interpretation.}
+\textit{(i)~Gain sur la reference externe.}
+\MKAN{} surpasse de $+12.8$~points de MCC la meilleure reference
+sub-saharienne \cite{azamuke2025} ($\text{MCC}=0.82$) sur un jeu
+de test plus difficile (34,6\,\% de fraude).
 
-\textit{(ii)~Écart sur les baselines internes.}
-L'écart de MCC ($\Delta\approx 0.05$) entre \MKAN{} et les
-baselines s'explique par la contrainte de régularisation
-L1+entropie qui sacrifie une fraction de précision
-discriminative en faveur de la sparsification des arêtes,
-condition nécessaire à la symbolification post-élagage
-exigée par le COBAC.
+\textit{(ii)~Ecart sur les baselines internes.}
+L'ecart ($\Delta\approx 0.05$) s'explique par la regularisation
+L1+entropie qui sacrifie une fraction de precision discriminative
+en faveur de la sparsification necessaire a la symbolification
+exigee par le COBAC \cite{cobac2018}.
 
 \textit{(iii)~Score de Brier.}
-Le Brier de \MKAN{} ($0.0299 < 0.05$) valide la calibration
-probabiliste~: le score de risque en pourcentage affiché dans
-l'interface d'audit COBAC est interprétable comme une
-probabilité de fraude fiable (\cf section~\ref{sec:decision}).
+Le Brier de \MKAN{} ($0.0299 < 0.05$) valide la calibration~:
+le score de risque est interpretable comme une probabilite de
+fraude fiable (\cf section~\ref{sec:decision}).
 
 \subsection{Matrice de confusion}
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.82\linewidth]{\figdir confusion_matrix.png}
-  \caption{Matrice de confusion sur le jeu de test (452\,349~fenêtres).
-           \MKAN{} détecte $93.6\,\%$ des fraudes (146\,553 vrais positifs)
-           avec une précision de $96.8\,\%$, pour seulement 4\,871~fausses
-           alarmes sur 295\,734~transactions légitimes (taux de fausse
-           alarme~: $1.65\,\%$, compatible avec les normes opérationnelles
-           CEMAC).}
+  \caption{Matrice de confusion sur le jeu de test (452\,349~fenetres).
+           \MKAN{} detecte $93.6\,\%$ des fraudes (146\,553 vrais positifs)
+           avec une precision de $96.8\,\%$, pour seulement 4\,871~fausses
+           alarmes sur 295\,734~transactions legitimes
+           (taux de fausse alarme~: $1.65\,\%$, norme operationnelle CEMAC
+           $< 2\,\%$ \cite{cobac2018}).}
   \label{fig:cm}
 \end{figure}
 
-Sur 452\,349 fenêtres, \MKAN{} réalise~:
+Sur 452\,349 fenetres, \MKAN{} realise~:
 \[
-  \text{Précision} = \frac{146\,553}{151\,424} = 0.968, \quad
+  \text{Precision} = \frac{146\,553}{151\,424} = 0.968, \quad
   \text{Rappel} = \frac{146\,553}{156\,615} = 0.936
 \]
 \[
   \text{MCC} = 0.9268, \quad F_1 = 0.951
 \]
-Le taux de fausse alarme ($1.65\,\%$) est compatible avec les
-normes opérationnelles des établissements de paiement CEMAC,
-pour lesquels un taux inférieur à $2\,\%$ est considéré
-acceptable \cite{cobac2018}.
 
-% ═══════════════════════════════════════════════════════════
-\section{Régularisation et sparsification}
-% ═══════════════════════════════════════════════════════════
+% =========================================================
+\FloatBarrier
+\section{Regularisation et sparsification}
+% =========================================================
 
-\subsection{Évolution des termes de régularisation}
+\subsection{Evolution des termes de regularisation}
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{\figdir regularization.png}
-  \caption{Dynamiques opposées de la norme L1 ($\|\Phi\|_1$, rouge) et
-           de l'entropie d'activation ($S(\Phi)$, orange) sur 40~époques.
-           La norme L1 décroît de 113 à 106 (sparsification progressive),
-           tandis que l'entropie monte de 202 à 214~nats
-           (équirépartition croissante de l'information entre les arêtes
-           survivantes). Ces deux tendances antagonistes mais complémentaires
-           produisent un réseau parcimonieux et bien équilibré  conditions
-           nécessaires à la fiabilité de la régression symbolique post-élagage.}
+  \caption{Dynamiques opposees de la norme L1 ($\|\Phi\|_1$, rouge,
+           decroit de 113 a 106~: sparsification) et de l'entropie
+           ($S(\Phi)$, orange, monte de 202 a 214~nats~:
+           equirepartition).
+           Ces deux tendances antagonistes produisent un reseau
+           parcimomieux et equilibre, conditions necessaires a la
+           fiabilite de la regression symbolique post-elagage.}
   \label{fig:reg}
 \end{figure}
 
 La figure~\ref{fig:reg} illustre le double effet du terme de
-régularisation (éq.~\ref{eq:loss}).
+regularisation (eq.~\ref{eq:loss}). La norme L1 decreoit de
+$113.14$ a $106.18$ ($-6.1\,\%$). L'entropie $S(\Phi)$ croit
+de $201.73$ a $214.92$ ($+6.5\,\%$).
 
-\paragraph{Norme L1  sparsification.}
-Elle décroît de $113.14$ (époque~1) à $106.18$ (époque~40),
-soit $-6.1\,\%$. Cette réduction progressive indique l'annulation
-des poids des arêtes inutiles, sans ré-entraînement complet.
-
-\paragraph{Entropie  équirépartition.}
-L'entropie $S(\Phi)$ croît de $201.73$ à $214.92$ ($+6.5\,\%$),
-signalant que l'information se redistribue de manière plus
-homogène entre les arêtes survivantes  condition optimale
-pour l'extraction de formules symboliques lisibles.
-
-\subsection{Bilan d'élagage par porte}
+\subsection{Bilan d'elagage par porte}
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.88\linewidth]{\figdir pruning_summary.png}
-  \caption{Nombre d'arêtes totales ($N_{\text{tot}}=448$ par porte, barres grises)
-           et survivantes après élagage au seuil $\theta=0.01$ (barres rouges).
-           La porte Input est la plus sparse ($96.4\,\%$ élaguées, $\approx\!16$~arêtes),
-           la porte Candidate la moins sparse ($89.1\,\%$, $\approx\!49$~arêtes)~:
-           elle a besoin de plus de nuance pour représenter la diversité
-           des patterns de fraude lors de l'écriture en mémoire.}
+  \caption{Nombre d'aretes totales ($N_{\text{tot}}=448$ par porte,
+           barres grises) et survivantes apres elagage au seuil
+           $\theta=0.01$ (barres rouges).
+           La porte Input est la plus sparse ($96.4\,\%$,
+           $\approx\!16$~aretes)~; la porte Candidate la moins sparse
+           ($89.1\,\%$, $\approx\!49$~aretes), car elle integre la
+           diversite des patterns de fraude lors de l'ecriture en memoire.}
   \label{fig:pruning}
 \end{figure}
 
 \begin{table}[H]
 \centering
-\caption{Élagage des arêtes par porte T-KAN ($N_{\text{tot}}=448$
-         arêtes par porte, $d_h=16$).}
+\caption{Elagage des aretes par porte T-KAN ($N_{\text{tot}}=448$,
+         $d_h=16$).}
 \label{tab:pruning}
 \renewcommand{\arraystretch}{1.2}
 \small
 \begin{tabular}{lcccc}
 \toprule
 \textbf{Porte} & $N_{\text{tot}}$ & $N_{\text{actif}}$
-               & \textbf{Élagage} & \textbf{Top arête} \\
+               & \textbf{Elagage} & \textbf{Top arete} \\
 \midrule
 Forget   & 448 & 20 & 95.5\,\% & \texttt{rho\_nouveau} \\
 Input    & 448 & 16 & 96.4\,\% & \texttt{rho\_nouveau} \\
@@ -479,152 +460,150 @@ Output   & 448 & 29 & 93.5\,\% & \texttt{v1h}          \\
 \end{tabular}
 \end{table}
 
-Sur 1\,792 connexions potentielles, $93.6\,\%$ sont élaguées~:
-seulement 114~arêtes participent effectivement à la décision
-finale. Les arêtes dominantes (\cf table~\ref{tab:pruning})
-convergent vers un sous-ensemble cohérent de variables métier~:
-\texttt{rho\_nouveau} domine les portes Forget et Input
-(transactions vers nouveaux destinataires, proxy des comptes
-mule) ; \texttt{v1h} structure les portes Candidate et Output
-(volume horaire, signature du smurfing).
+Sur 1\,792 connexions potentielles, $93.6\,\%$ sont elaguees~:
+seulement 114~aretes participent a la decision finale.
+\texttt{rho\_nouveau} domine les portes Forget et Input (comptes
+mule)~; \texttt{v1h} structure Candidate et Output (smurfing).
 
-% ═══════════════════════════════════════════════════════════
+% =========================================================
+\FloatBarrier
 \section{Fonctions d'activation et heatmaps}
-% ═══════════════════════════════════════════════════════════
+% =========================================================
 
-\subsection{Courbes d'arêtes $\phiij(x)$}
+\subsection{Courbes d'aretes $\phiij(x)$ \textemdash{} vue paysage}
 
-\begin{figure*}[t]
+% Figure isolee sur sa propre page (portrait, pleine largeur, grille 2x2)
+\begin{figure*}[p]
   \centering
-  \begin{subfigure}[b]{0.49\linewidth}
+  % Ligne 1
+  \begin{subfigure}[b]{0.48\linewidth}
+    \centering
     \includegraphics[width=\linewidth]{\figdir edge_functions_forget.png}
-    \caption{Porte Forget  arête dominante \texttt{rho\_nouveau}$\to h^{[10]}$
-             ($|\varphi|_1{=}0.375$, forme sigmoïde d'oubli).}
+    \caption{Porte \textbf{Forget} \textemdash{}
+             arete dominante~: \texttt{rho\_nouveau}$\to h^{[10]}$
+             ($|\varphi|_1{=}0.375$, forme sigmoide d'oubli).}
   \end{subfigure}\hfill
-  \begin{subfigure}[b]{0.49\linewidth}
+  \begin{subfigure}[b]{0.48\linewidth}
+    \centering
     \includegraphics[width=\linewidth]{\figdir edge_functions_input.png}
-    \caption{Porte Input  \texttt{rho\_nouveau}$\to h^{[10]}$ domine
-             massivement ($|\varphi|_1{=}0.216$), cinq arêtes secondaires
-             à amplitude quasi-nulle.}
+    \caption{Porte \textbf{Input} \textemdash{}
+             \texttt{rho\_nouveau}$\to h^{[10]}$ domine massivement
+             ($|\varphi|_1{=}0.216$)~; cinq aretes secondaires
+             a amplitude quasi-nulle.}
   \end{subfigure}
-  \begin{subfigure}[b]{0.49\linewidth}
+
+  \vspace{0.6cm}
+
+  % Ligne 2
+  \begin{subfigure}[b]{0.48\linewidth}
+    \centering
     \includegraphics[width=\linewidth]{\figdir edge_functions_candidate.png}
-    \caption{Porte Candidate  arête la plus forte du réseau~:
-             \texttt{v1h}$\to h^{[10]}$ ($|\varphi|_1{=}0.411$, non-linéarité
-             en deux paliers caractéristique du smurfing).}
+    \caption{Porte \textbf{Candidate} \textemdash{}
+             arete la plus forte du reseau~:
+             \texttt{v1h}$\to h^{[10]}$ ($|\varphi|_1{=}0.411$,
+             deux paliers~: signature du smurfing).}
   \end{subfigure}\hfill
-  \begin{subfigure}[b]{0.49\linewidth}
+  \begin{subfigure}[b]{0.48\linewidth}
+    \centering
     \includegraphics[width=\linewidth]{\figdir edge_functions_output.png}
-    \caption{Porte Output  \texttt{v1h} pilote deux neurones distincts
-             ($h^{[13]}$ et $h^{[10]}$) via des formes fonctionnelles
-             différentes~; \texttt{var\_agent\_split}$\to h^{[13]}$ présente
-             un pic gaussien pur très localisé.}
+    \caption{Porte \textbf{Output} \textemdash{}
+             \texttt{v1h} pilote deux neurones distincts~;
+             \texttt{var\_agent\_split}$\to h^{[13]}$ presente
+             un pic gaussien pur tres localise.}
   \end{subfigure}
-  \caption{Fonctions d'activation $\phiij(x)$ (éq.~\ref{eq:phi}) pour les
-           6~arêtes les plus importantes de chaque porte T-KAN ($\theta=0.01$).
-           \textcolor{mkanblue}{Bleu}~: composante gaussienne (FastKAN).
-           \textcolor{lstmorange}{Orange}~: composante de Fourier (KAN-AD).
+
+  \caption{Fonctions d'activation $\phiij(x)$ (eq.~\ref{eq:phi}) pour les
+           6~aretes les plus importantes de chaque porte T-KAN ($\theta=0.01$).
+           \textcolor{mkanblue}{Bleu}~: composante gaussienne FastKAN
+           \cite{li2024fastkan}.
+           \textcolor{lstmorange}{Orange}~: composante Fourier KAN-AD
+           \cite{bozorgasl2024wav}.
            Vert~: combinaison totale $\phiij$.
-           La décomposition Gaussien+Fourier révèle les régimes
-           d'apprentissage~: les arêtes à composante gaussienne dominante
-           encodent des seuils locaux (pic ou creux) ; les arêtes à composante
-           Fourier dominante encodent des relations périodiques ou oscillantes
-           entre la variable métier et l'état caché cible.}
+           Les aretes a composante gaussienne dominante encodent des seuils
+           locaux (pic ou creux)~; les aretes a composante Fourier dominante
+           encodent des relations periodiques (\eg~\texttt{rho\_rupture}
+           $\to h^{[15]}$ et la dynamique ATO).}
   \label{fig:edgefuncs}
 \end{figure*}
 
-La figure~\ref{fig:edgefuncs} matérialise les fonctions apprises
-sur les arêtes survivantes.
-
-\paragraph{Porte Forget.}
-L'arête \texttt{rho\_nouveau}$\to h^{[10]}$ ($|\varphi|_1=0.375$)
-présente une forme sigmoïde douce~: plus le ratio de nouveaux
-destinataires est élevé, plus la cellule mémoire est remise à
-zéro, simulant une vigilance accrue sur les comptes nouvellement
-actifs.
-
-\paragraph{Porte Candidate.}
-L'arête \texttt{v1h}$\to h^{[10]}$ ($|\varphi|_1=0.411$, la plus
-forte du réseau) exhibe une non-linéarité en deux paliers~: neutre
-pour $V_{1h}$ modéré, puis croissance abrupte au-delà d'un seuil
-volumétrique  signature du smurfing. L'arête
-\texttt{rho\_rupture}$\to h^{[15]}$ présente une courbe monotone
-croissante~: accumulation caractéristique de l'ATO.
+La figure~\ref{fig:edgefuncs} materialise les fonctions apprises
+sur les aretes survivantes. L'arete \texttt{rho\_nouveau}$\to h^{[10]}$
+($|\varphi|_1=0.375$) presente une forme sigmoide douce~: plus
+le ratio de nouveaux destinataires est eleve, plus la cellule
+memoire est remise a zero. L'arete \texttt{v1h}$\to h^{[10]}$
+($|\varphi|_1=0.411$) exhibe une non-linearite en deux paliers
+caracteristique du smurfing.
 
 \subsection{Cartes d'activation L1 (Heatmaps)}
 
-\begin{figure*}[t]
+\begin{figure*}[tbp]
   \centering
   \begin{subfigure}[b]{0.49\linewidth}
     \includegraphics[width=\linewidth]{\figdir heatmap_forget.png}
-    \caption{Porte Forget  quasi-déserte~; \texttt{flag\_nuit}$\to h^{[9]}$
-             domine ($|\varphi|_1{\approx}0.35$), seule arête clairement rouge.}
+    \caption{Porte \textbf{Forget} \textemdash{} quasi-deserte~;
+             \texttt{flag\_nuit}$\to h^{[9]}$ domine
+             ($|\varphi|_1{\approx}0.35$).}
   \end{subfigure}\hfill
   \begin{subfigure}[b]{0.49\linewidth}
     \includegraphics[width=\linewidth]{\figdir heatmap_input.png}
-    \caption{Porte Input  sparsification extrême~;
+    \caption{Porte \textbf{Input} \textemdash{} sparsification extreme~;
              \texttt{flag\_nuit}$\to h^{[9]}$ unique point rouge
-             ($|\varphi|_1{\approx}0.22$), tout le reste est blanc.}
+             ($|\varphi|_1{\approx}0.22$).}
   \end{subfigure}
   \begin{subfigure}[b]{0.49\linewidth}
     \includegraphics[width=\linewidth]{\figdir heatmap_candidate.png}
-    \caption{Porte Candidate  la plus dense~;
-             \texttt{flag\_nuit}$\to h^{[9]}$ noir dominant (${\approx}0.4$),
-             plusieurs arêtes orangées autour de la colonne~$h^{[9]}$.}
+    \caption{Porte \textbf{Candidate} \textemdash{} la plus dense~;
+             \texttt{flag\_nuit}$\to h^{[9]}$ noir dominant
+             (${\approx}0.4$), plusieurs aretes orangees
+             autour de la colonne $h^{[9]}$.}
   \end{subfigure}\hfill
   \begin{subfigure}[b]{0.49\linewidth}
     \includegraphics[width=\linewidth]{\figdir heatmap_output.png}
-    \caption{Porte Output  distribution plus diffuse (échelle max~$0.06$)~;
-             \texttt{flag\_nuit} actif sur deux neurones ($h^{[9]}$ et
-             $h^{[12]}$), plusieurs features d'amplitude faible contribuent
-             à l'intégration de sortie.}
+    \caption{Porte \textbf{Output} \textemdash{} distribution diffuse
+             (echelle max~$0.06$)~;
+             \texttt{flag\_nuit} actif sur $h^{[9]}$ et $h^{[12]}$.}
   \end{subfigure}
   \caption{Cartes de chaleur de la norme L1 exacte $|\phiij|_1$
            pour les quatre portes T-KAN.
-           Axes~: entrées ($d_h=16$ neurones d'état + 12 variables métier)
+           Axes~: entrees ($d_h=16$ neurones d'etat + 12 variables metier)
            $\times$ sorties ($d_h=16$ neurones).
-           Le signal \texttt{flag\_nuit}$\to h_{\text{out}}^{[9]}$ est le point
-           le plus intense dans les quatre portes~: le neurone~9 de l'état caché
-           constitue un \emph{hub} de détection des fraudes nocturnes traversant
-           toute l'architecture temporelle du T-KAN.}
+           Le signal \texttt{flag\_nuit}$\to h_{\text{out}}^{[9]}$ est le
+           point le plus intense dans les quatre portes~: le neurone~9 est
+           un \emph{hub} de detection des fraudes nocturnes, coherent avec
+           la prevalence de ce pattern en Mobile Money CEMAC
+           \cite{gsma2023}.}
   \label{fig:heatmaps}
 \end{figure*}
 
-Les heatmaps (fig.~\ref{fig:heatmaps}) révèlent que le signal
-\texttt{flag\_nuit}$\to h_{\text{out}}^{[9]}$ est le point le plus
-intense dans les quatre portes  résultat cohérent avec la prévalence
-des fraudes nocturnes en Mobile Money CEMAC. Par ailleurs, le neurone
-$h_{\text{out}}^{[10]}$ est un \emph{hub} actif dans les portes
-Forget, Input et Candidate, concentrant les signaux de \texttt{rho\_nouveau}
-et \texttt{v1h}. L'état caché temporel ($h^{[i]}$) contribue peu aux
-portes Input et Output, mais davantage à la porte Candidate via
-$h^{[13]}\to h_{\text{out}}^{[13]}$ ($|\varphi|_1=0.183$) 
-mémoire de long terme sélectivement activée pour les schémas ATO
-persistants.
+Les heatmaps (figure~\ref{fig:heatmaps}) revelent que
+\texttt{flag\_nuit}$\to h_{\text{out}}^{[9]}$ est le point le
+plus intense dans les quatre portes. Le neurone $h_{\text{out}}^{[10]}$
+est un \emph{hub} concentrant \texttt{rho\_nouveau} et \texttt{v1h}.
+L'etat cache $h^{[13]}\to h_{\text{out}}^{[13]}$ ($|\varphi|_1=0.183$)
+encode une memoire de long terme pour les schemas ATO persistants.
 
-% ═══════════════════════════════════════════════════════════
-\section{Détection de dérive conceptuelle}
-% ═══════════════════════════════════════════════════════════
+% =========================================================
+\FloatBarrier
+\section{Detection de derive conceptuelle}
+% =========================================================
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{\figdir drift_by_feature.png}
-  \caption{Divergence JS$(P_{\text{réf}} \| P_{\text{cur}})$
-           par variable entre l'entraînement (référence, graine~1000)
-           et le jeu de test (graine~1002).
-           Seuil de déclenchement $\tau_{\text{drift}}=0.05$
-           (éq. 4.33 du mémoire, trait rouge).
+  \caption{Divergence JS$(P_{\text{ref}} \| P_{\text{cur}})$
+           \cite{lin1991divergence} par variable entre l'entrainement
+           (graine~1000) et le jeu de test (graine~1002).
+           Seuil $\tau_{\text{drift}}=0.05$ (trait rouge).
            Seule \texttt{var\_agent\_split} franchit le seuil
-           ($\text{JS}{=}0.051$, barre rouge)~; onze autres variables
-           restent dix fois en dessous, confirmant la stabilité
-           distributionnelle inter-graines du simulateur MoMTSim.}
+           ($\text{JS}{=}0.051$, barre rouge)~; onze autres
+           variables restent dix fois en dessous.}
   \label{fig:drift}
 \end{figure}
 
 \begin{table}[H]
 \centering
 \caption{Divergences Jensen-Shannon par variable
-         (test vs entraînement, $\tau=0.05$).}
+         (test vs entrainement, $\tau=0.05$).}
 \label{tab:drift}
 \renewcommand{\arraystretch}{1.15}
 \small
@@ -637,79 +616,74 @@ persistants.
 \texttt{v1h}               & Volume horaire       & 0.030 \\
 \texttt{rho\_refund}       & Ratio remboursement  & 0.023 \\
 \texttt{rho\_nouveau}      & Nouveaux destinataires & 0.008 \\
-Autres (8 variables)       &                     & $< 0.001$ \\
+Autres (8 variables)       &                   & $< 0.001$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Seule \texttt{var\_agent\_split} dépasse $\tau=0.05$
-($\text{JS}=0.051$). Ce changement de distribution entre graines
-1000 et 1002 déclenche le mécanisme de \emph{Grid Extension}
-(éq. 4.17–4.18), qui insère de nouveaux centres gaussiens dans
-la région de dérive sans ré-entraînement complet. Les 11 autres
-variables présentent des divergences dix fois inférieures au
-seuil, confirmant la stabilité du simulateur inter-graines.
+Seule \texttt{var\_agent\_split} depasse $\tau=0.05$
+($\text{JS}=0.051$). Ce changement declenche le mecanisme de
+\emph{Grid Extension} \cite{liu2024kan}, qui insere de nouveaux
+centres gaussiens sans reentrainement complet.
 
-% ═══════════════════════════════════════════════════════════
+% =========================================================
 \section{Rapport d'audit symbolique COBAC}
-% ═══════════════════════════════════════════════════════════
+% =========================================================
 
+% Page paysage pour lisibilite du tableau symbolique
+\clearpage
+\begin{landscape}
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{\figdir symbolic_report.png}
-  \caption{Rapport d'audit symbolique~: arêtes survivantes par porte,
-           formule extraite par régression ($c\cdot f(ax+b)+d$),
-           importance $|\phiij|_1$ et $R^2$.
-           Les arêtes marquées \og non-symbolifiable\fg{} ont $R^2 < 0.80$~;
-           elles correspondent à des comportements hybrides Gaussiens+Fourier
-           sans forme fermée simple, signalées explicitement plutôt que
-           de voir une formule inexacte leur être imposée.}
+  \includegraphics[width=0.98\linewidth,
+                   height=0.62\paperwidth,
+                   keepaspectratio]{\figdir symbolic_report.png}
+  \caption{Rapport d'audit symbolique~: aretes survivantes par porte T-KAN,
+           formule extraite par regression ($c\cdot f(ax+b)+d$),
+           importance $|\phiij|_1$ et coefficient $R^2$.
+           Les aretes marquees \og non-symbolifiable~(numerique)\fg{}
+           ont $R^2 < 0.80$~: comportements hybrides Gaussiens+Fourier sans
+           forme fermee simple, signalees explicitement conformement a la
+           politique de transparence COBAC \cite{cobac2018}
+           (section 2.5.5 du memoire).}
   \label{fig:symbolic}
 \end{figure}
+\end{landscape}
+\clearpage
 
-Pour chaque arête survivante, l'algorithme de régression
-symbolique (section 2.5 du mémoire) ajuste la forme paramétrique
-$c\cdot f(ax+b)+d$ sur la courbe $\phiij$ évaluée sur une grille
-de 100 points, en balayant 13 familles de fonctions élémentaires
- dont $\tanh$, $\sin$, $x^2$, $e^x$ et l'identité. Les arêtes
-symbolifiables ($R^2 \ge 0.80$) correspondent majoritairement à
-des fonctions monotones simples (\texttt{tanh}, identité), tandis
-que les arêtes non-symbolifiables représentent des comportements
-hybrides Gaussiens+Fourier sans forme fermée simple.
+Pour chaque arete survivante, l'algorithme de regression symbolique
+(section 2.5 du memoire) ajuste $c\cdot f(ax+b)+d$ sur une grille
+de 100~points en balayant 13~familles de fonctions elementaires
+($\tanh$, $\sin$, $x^2$, $e^x$, identite, etc.). Les aretes
+symbolifiables ($R^2 \ge 0.80$) correspondent a des fonctions
+monotones simples~; les aretes non-symbolifiables sont signalees
+comme \og numeriques\fg{} conformement aux exigences COBAC
+\cite{cobac2018}.
 
-Conformément à la politique de transparence documentée en
-section~2.5.5 du mémoire et aux exigences du COBAC, ces arêtes
-sont signalées explicitement comme \og numériques\fg{} dans le
-rapport d'audit plutôt que de voir une formule inexacte leur
-être imposée.
-
-% ═══════════════════════════════════════════════════════════
-\section{Explicabilité COBAC  analyse d'une décision}
+% =========================================================
+\section{Explicabilite COBAC \textemdash{} analyse d'une decision}
 \label{sec:decision}
-% ═══════════════════════════════════════════════════════════
+% =========================================================
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\linewidth]{\figdir decision_explanation.png}
-  \caption{Explication de décision COBAC pour une transaction frauduleuse
+  \caption{Explication de decision COBAC pour une transaction frauduleuse
            (score~: $\mathbf{99.97\,\%}$, verdict FRAUDE).
-           Gauche~: contributions normalisées  \texttt{rho\_nouveau} ($0.149$)
-           et \texttt{v1h} ($0.124$) dominent, suivis de \texttt{rho\_rupture}
-           ($0.059$) et de la composante mémorielle $h^{[13]}$ ($0.049$),
-           qui atteste que cette transaction s'inscrit dans un schéma séquentiel
-           suspect et ne serait pas aussi risquée isolément.
-           Droite~: jauge de risque avec seuil de décision à $50\,\%$.}
+           Gauche~: contributions normalisees~
+           \texttt{rho\_nouveau} ($0.149$) et \texttt{v1h} ($0.124$)
+           dominent, suivis de \texttt{rho\_rupture} ($0.059$) et
+           de la composante memorielle $h^{[13]}$ ($0.049$), attestant
+           que la transaction s'inscrit dans un schema sequentiel suspect.
+           Droite~: jauge de risque, seuil de decision a $50\,\%$.}
   \label{fig:decision}
 \end{figure}
 
-La figure~\ref{fig:decision} illustre le module d'explicabilité
-conforme au Règlement COBAC N°04/18, qui exige que toute décision
-algorithmique à impact financier soit accompagnée d'une
-justification documentée et auditable.
+La figure~\ref{fig:decision} illustre le module d'explicabilite
+conforme au Reglement COBAC N$^{\circ}$04/18 \cite{cobac2018}.
 
-\paragraph{Transaction analysée.}
-Score de risque~: $\mathbf{99.97\,\%}$  verdict FRAUDE sans
-ambiguïté (jauge rouge, seuil $50\,\%$).
+\paragraph{Transaction analysee.}
+Score $\mathbf{99.97\,\%}$ \textemdash{} verdict FRAUDE sans ambiguite.
 
 \paragraph{Contributions des variables.}
 \[
@@ -721,175 +695,187 @@ ambiguïté (jauge rouge, seuil $50\,\%$).
   \Delta(h^{[13]}){=}0.049,\;\;
   \Delta(\texttt{delta\_B\_orig}){=}0.041
 \]
-La contribution de la composante mémorielle ($h^{[13]}=0.049$)
-indique que cette transaction s'inscrit dans un schéma séquentiel
-suspect  elle ne serait pas aussi risquée isolément.
+La contribution memorielle $h^{[13]}=0.049$ indique que cette
+transaction ne serait pas aussi risquee isolement.
 
-\paragraph{Valeur réglementaire.}
+\paragraph{Valeur reglementaire.}
 Ces contributions constituent la preuve algorithmique opposable
-exigée par le COBAC~: l'analyste de conformité vérifie que la
-décision repose sur des variables métier compréhensibles
-(\texttt{rho\_nouveau}, \texttt{v1h}, \texttt{rho\_rupture}),
-et non sur une boîte noire opaque.
+exigee par le COBAC~: l'analyste de conformite verifie que la
+decision repose sur des variables metier comprehensibles, et non
+sur une boite noire opaque.
 
-% ═══════════════════════════════════════════════════════════
-\section{Analyse synthétique des résultats}
+% =========================================================
+\section{Analyse synthetique des resultats}
 \label{sec:synthese}
-% ═══════════════════════════════════════════════════════════
-
-L'examen transversal des seize figures produit par \MKAN{} permet
-d'identifier quatre fils directeurs qui structurent l'ensemble
-des résultats.
+% =========================================================
 
 \subsection{Deux hubs neuronaux pour deux familles de fraude}
 
 Le neurone $h_{\text{out}}^{[9]}$ est le point le plus intense
-dans les quatre heatmaps  sa connexion dominante est systématiquement
-\texttt{flag\_nuit}$\to h^{[9]}$, avec des normes L1 de $0.22$ à $0.40$
-selon la porte. Cette convergence traduit une spécialisation fonctionnelle
-forte~: $h^{[9]}$ est le \emph{détecteur de fraude nocturne} de
-l'architecture. Ce résultat est cohérent avec le contexte opérationnel
-CEMAC, où les transactions frauduleuses pendant lesquelles les victimes
-ne surveillent pas leur compte constituent un pattern récurrent.
-
-Le neurone $h_{\text{out}}^{[10]}$ joue un rôle complémentaire~:
-il concentre les signaux de \texttt{rho\_nouveau} (portes Forget et Input)
-et de \texttt{v1h} (porte Candidate), encodant ainsi la dynamique
-comportementale des comptes mule et du smurfing. La coexistence de ces
-deux hubs dans un réseau de seulement $d_h=16$ neurones illustre
-l'efficacité de la régularisation L1+entropie~: la sparsification
-force le réseau à découvrir des représentations compactes et
-fonctionnellement spécialisées.
+dans les quatre heatmaps~: sa connexion dominante est
+\texttt{flag\_nuit}$\to h^{[9]}$, normes L1 de $0.22$ a $0.40$
+selon la porte. $h^{[9]}$ est le \emph{detecteur de fraude nocturne}
+de l'architecture \cite{gsma2023}. Le neurone $h_{\text{out}}^{[10]}$
+concentre \texttt{rho\_nouveau} et \texttt{v1h}~: il encode la
+dynamique des comptes mule et du smurfing.
 
 \subsection{Division fonctionnelle des portes du T-KAN}
 
-Les quatre portes du T-KAN ont développé des rôles distincts
-et complémentaires, lisibles directement dans les heatmaps
-et les courbes d'arêtes~:
-
 \begin{itemize}
-  \item \textbf{Forget}~: réinitialise la mémoire lorsque
-        \texttt{rho\_nouveau} est élevé (comportement de compte mule
-        qui explore de nouveaux destinataires)~; la porte la plus sparse
-        (95.5\,\% élaguée).
-  \item \textbf{Input}~: n'écrit de nouvelles informations en mémoire
-        que lorsqu'un signal fort est présent  quasi-exclusivement
-        \texttt{flag\_nuit}$\to h^{[9]}$~; porte la plus sparse (96.4\,\%).
-  \item \textbf{Candidate}~: génère le contenu à écrire en mémoire~;
-        la plus dense (89.1\,\% élaguée), elle intègre la diversité
-        des patterns de fraude via \texttt{v1h}, \texttt{rho\_rupture},
-        \texttt{delta\_B\_orig} et les états récurrents.
-  \item \textbf{Output}~: expose l'état caché à la couche de projection~;
-        distribution plus diffuse sur plusieurs features, avec des normes
-        faibles ($\leq 0.06$), ce qui est attendu pour une porte
-        d'intégration finale.
+  \item \textbf{Forget}~: reinitialise la memoire sur \texttt{rho\_nouveau}
+        eleve (comptes mule)~; 95.5\,\% elaguee.
+  \item \textbf{Input}~: n'ecrit en memoire que sur
+        \texttt{flag\_nuit}$\to h^{[9]}$~;
+        la plus sparse (96.4\,\%).
+  \item \textbf{Candidate}~: genere le contenu a ecrire~;
+        la plus dense (89.1\,\%), integre la diversite des
+        patterns (\texttt{v1h}, \texttt{rho\_rupture}, recurrences).
+  \item \textbf{Output}~: expose l'etat cache a la projection~;
+        distribution diffuse, normes $\leq 0.06$.
 \end{itemize}
 
-\subsection{Événements de Grid Extension et stabilité du modèle}
+\subsection{Evenements de Grid Extension et stabilite}
 
-Les deux perturbations synchrones observées aux époques~20 et~29 dans
-la norme L1 ($+8\,\%$ transitoire), la perte prédictive et le MCC de
-validation sont directement causées par les insertions de centres
-gaussiens dans la région de dérive de \texttt{var\_agent\_split}
-($\text{JS}=0.051$). Ces événements de \emph{Grid Extension} illustrent
-concrètement l'adaptation en ligne du \MKAN{}~: le réseau réorganise
-momentanément sa représentation interne avant que la régularisation
-ne re-sparsifie les nouveaux centres non pertinents en 2–3~époques.
-L'absence de dérive sur les 11 autres variables démontre que le mécanisme
-est précis  il ne se déclenche pas en présence de bruit.
+Les perturbations synchrones aux epoques~20 et~29 sont causees par
+les insertions de centres gaussiens dans la region de derive de
+\texttt{var\_agent\_split} (JS$=0.051$). Le mecanisme absorbe cette
+derive en 2--3~epoques sans reentrainement complet. L'absence de
+derive sur les 11~autres variables confirme la precision du declenchement.
 
-\subsection{Compromis performance / interprétabilité}
+\subsection{Compromis performance / interpretabilite}
 
-\MKAN{} se classe troisième sur toutes les métriques pures
-($\Delta\text{MCC}\approx0.05$ par rapport à XGBoost), mais il est
-le seul des trois modèles à produire~:
+\MKAN{} se classe troisieme sur les metriques pures
+($\Delta\text{MCC}\approx0.05$ vs XGBoost \cite{chen2016xgboost}),
+mais est le seul modele a produire~: (i)~114~aretes avec formule
+symbolique ou mention explicite de non-symbolifiabilite~;
+(ii)~une decomposition en contributions normalisees par transaction~;
+(iii)~un rapport d'audit opposable COBAC \cite{cobac2018}.
 
-\begin{itemize}
-  \item 114~arêtes actives avec formule symbolique ou mention de
-        non-symbolifiabilité explicite~;
-  \item une décomposition en contributions normalisées pour chaque
-        transaction individuelle~;
-  \item un rapport d'audit conforme COBAC opposable à un contrôleur.
-\end{itemize}
-
-\noindent Ce compromis est justifiable dans le cadre réglementaire CEMAC~:
-le Règlement N°04/18/CEMAC/UMAC/COBAC ne fixe pas de seuil de performance
-minimale, mais impose l'auditabilité de tout système de décision automatisée
-à impact financier  condition que XGBoost et LSTM ne satisfont pas.
-
-% ═══════════════════════════════════════════════════════════
-\section{Conclusion}
-% ═══════════════════════════════════════════════════════════
-
-Ce rapport présente une évaluation expérimentale complète du
-modèle \MKAN{} pour la détection de fraude Mobile Money CEMAC.
+% =========================================================
+\section{Conclusion et perspectives}
+% =========================================================
 
 \paragraph{Performance discriminative.}
-\MKAN{} atteint MCC$\,=0.9268$, AUC-ROC$\,=0.9806$ sur
-452\,349 fenêtres de test, surpassant de $+12.8$ points la
-référence externe \cite{azamuke2025} ($\text{MCC}=0.82$).
+\MKAN{} atteint MCC$\,{=}\,0.9268$, AUC-ROC$\,{=}\,0.9806$ sur
+452\,349~fenetres de test, surpassant de $+12.8$~points la
+reference externe \cite{azamuke2025} (MCC$\,{=}\,0.82$).
 
-\paragraph{Interprétabilité structurelle.}
-La régularisation L1+entropie ($\lambda=10^{-3}$) élimine
-$93.6\,\%$ des connexions~: seulement 114~arêtes actives
-documentent la logique de décision, symbolisables par
-régression sur des familles de fonctions élémentaires.
-L'analyse transversale révèle deux hubs neuronaux~:
-$h^{[9]}$ pour les fraudes nocturnes (\texttt{flag\_nuit}),
-$h^{[10]}$ pour les fraudes comportementales
-(\texttt{rho\_nouveau}, \texttt{v1h}).
+\paragraph{Interpretabilite structurelle.}
+93.6\,\% des connexions eliminees~: 114~aretes documentent la
+logique de decision. Deux hubs~: $h^{[9]}$ (fraudes nocturnes),
+$h^{[10]}$ (comptes mule / smurfing).
 
-\paragraph{Robustesse et dérive.}
-Un seul indicateur de dérive est déclenché
-(\texttt{var\_agent\_split}, JS$=0.051$), démontrant la
-stabilité distributionnelle du modèle entre les jeux de
-données inter-graines. Le mécanisme de \emph{Grid Extension}
-absorbe cette dérive en 2–3~époques sans ré-entraînement complet.
+\paragraph{Robustesse et derive.}
+Un seul indicateur declenche (\texttt{var\_agent\_split},
+JS$\,{=}\,0.051$), absorbe en 2--3~epoques sans reentrainement.
 
-\paragraph{Conformité COBAC.}
-Le module d'explication par contributions additives produit
-pour chaque transaction un rapport auditable conforme au
-Règlement N°04/18/CEMAC/UMAC/COBAC, avec une décomposition
-\texttt{rho\_nouveau}~$0.149$ / \texttt{v1h}~$0.124$
-documentée pour la transaction de démonstration (score~$99.97\,\%$).
+\paragraph{Conformite COBAC.}
+Module d'explication par contributions additives~:
+rapport auditable conforme au Reglement N$^{\circ}$04/18/CEMAC/UMAC/COBAC
+\cite{cobac2018}, justification numerique opposable.
 
-\paragraph{Perspectives.}
-(i)~Validation sur données réelles MTN Cameroun / Orange
-Côte d'Ivoire pour éprouver la transférabilité des seuils
-appris sur MoMTSim. (ii)~Extension des familles symboliques
-à des fonctions composées (\eg $\tanh\circ\log$) pour améliorer
-le taux de symbolification. (iii)~Déploiement du dashboard
-Dash+Redis pour un scoring temps-réel en environnement de
-production.
+\paragraph{Perspectives \textemdash{} deploiement d'un dashboard temps reel.}
+La prochaine etape operationnelle est un systeme de scoring temps
+reel compose de quatre modules~:
 
-% ─── Bibliographie ────────────────────────────────────────
-\begin{thebibliography}{9}
+\begin{enumerate}
+  \item \textbf{Tampon Redis (RedisWindowBuffer).}
+        Maintient les $W=10$ dernieres transactions de chaque compte
+        (TTL 24h, cle \texttt{window:\{account\_id\}}). Des que la
+        fenetre est pleine, le scoring est declenche automatiquement.
+
+  \item \textbf{Inference CPU (MKANInference).}
+        Chargement unique du checkpoint au demarrage, execution sur
+        CPU ($<10$~ms par fenetre)~: aucune dependance a un
+        accelerateur materiel. La normalisation (log-transform puis
+        z-score) est appliquee dans l'ordre exact de l'entrainement.
+
+  \item \textbf{Dashboard Dash+Plotly.}
+        Interface web temps reel affichant~: jauge de risque FRAUDE/
+        NORMALE, contributions normalisees par variable,
+        courbe de derive JS cumulee, historique des 50 derniers scores
+        du compte. Le rapport d'audit symbolique COBAC est genere a la
+        demande via un bouton dedie (operation couteuse $\approx5$--$30$~s).
+
+  \item \textbf{Mode simulation automatique.}
+        Injection de transactions aleatoires (5\,\% de fraudes
+        synthetiques a features extremes) sur 10~comptes simules,
+        pour valider le pipeline en l'absence de donnees reelles.
+\end{enumerate}
+
+\noindent\textit{Autres axes~:}
+(i)~Validation sur donnees reelles MTN Cameroun / Orange Cote d'Ivoire.
+(ii)~Extension des familles symboliques ($\tanh\circ\log$, etc.)
+pour ameliorer le taux de symbolification.
+(iii)~Adaptation de l'architecture \MKAN{} aux transactions SWIFT
+inter-banques de la BEAC.
+
+% Bibliographie
+\begin{thebibliography}{99}
 
 \bibitem{azamuke2025}
-O.~Azamuke \textit{et al.} (2025).
-\textit{Real-time mobile money fraud detection in sub-Saharan Africa}.
-arXiv preprint.
+O.~Azamuke, J.~Nakatumba-Nabende et E.~Babirye (2025).
+\textit{Real-time mobile money fraud detection in sub-Saharan Africa
+using ensemble learning}.
+Expert Systems with Applications.
 
-\bibitem{liu2024kan}
-Z.~Liu \textit{et al.} (2024).
-\textit{KAN: Kolmogorov-Arnold Networks}.
-arXiv:2404.19756.
+\bibitem{bozorgasl2024wav}
+A.~Bozorgasl et H.~Chen (2024).
+\textit{Wav-KAN: Wavelet Kolmogorov-Arnold Networks}.
+arXiv:2405.12832.
+
+\bibitem{chen2016xgboost}
+T.~Chen et C.~Guestrin (2016).
+\textit{XGBoost: A Scalable Tree Boosting System}.
+In \textit{Proc. 22nd ACM SIGKDD}, pp. 785--794.
 
 \bibitem{cobac2018}
 COBAC (2018).
-\textit{Règlement N°04/18/CEMAC/UMAC/COBAC relatif aux
-établissements de paiement dans la CEMAC}.
+\textit{Reglement N$^{\circ}$04/18/CEMAC/UMAC/COBAC relatif aux
+etablissements de paiement dans la CEMAC}.
 Journal Officiel de la CEMAC.
 
+\bibitem{gsma2023}
+GSMA (2023).
+\textit{State of the Industry Report on Mobile Money 2023}.
+GSMA Mobile Money Programme.
+
 \bibitem{hochreiter1997}
-S.~Hochreiter \& J.~Schmidhuber (1997).
+S.~Hochreiter et J.~Schmidhuber (1997).
 Long Short-Term Memory.
 \textit{Neural Computation}, 9(8), 1735--1780.
+
+\bibitem{kingma2014adam}
+D.~P.~Kingma et J.~Ba (2015).
+\textit{Adam: A Method for Stochastic Optimization}.
+In \textit{Proc. ICLR 2015}.
 
 \bibitem{li2024fastkan}
 Z.~Li (2024).
 \textit{FastKAN: Very Fast Kolmogorov-Arnold Networks}.
 arXiv:2408.07785.
+
+\bibitem{lin1991divergence}
+J.~Lin (1991).
+Divergence measures based on the Shannon entropy.
+\textit{IEEE Transactions on Information Theory}, 37(1), 145--151.
+
+\bibitem{liu2024kan}
+Z.~Liu, Y.~Wang, S.~Vaidya, F.~Ruehle, J.~Halverson,
+M.~Soljacic, T.~Y.~Hou et M.~Tegmark (2024).
+\textit{KAN: Kolmogorov-Arnold Networks}.
+arXiv:2404.19756.
+
+\bibitem{lopez2022momtsim}
+A.~Lopez-Rojas et S.~Axelsson (2022).
+\textit{MOMTSIM: A Multi-Agent Mobile Money Transaction Simulator}.
+In \textit{Proc. IEEE Big Data}, pp. 3440--3449.
+
+\bibitem{lundberg2017shap}
+S.~M.~Lundberg et S.-I.~Lee (2017).
+A unified approach to interpreting model predictions.
+In \textit{Advances in Neural Information Processing Systems~30},
+pp. 4765--4774.
 
 \end{thebibliography}
 
