@@ -116,6 +116,26 @@ from niveau1_harness import (                                 # noqa: E402
 )
 
 
+def select_training_device(prefer: Optional[str] = None) -> torch.device:
+    """
+    Sélectionne le device d'ENTRAÎNEMENT (jamais celui de la mesure de latence,
+    qui reste toujours CPU — cf. _measure_latency_ms). Cascade : prefer explicite
+    > MPS (Apple Silicon, ex. M4) > CUDA > CPU.
+
+    Ne concerne QUE l'entraînement/l'inférence de recherche : la contrainte de
+    latence USSD (100 ms, batch=256) est une propriété du canal de production
+    CPU-only, indépendante de la machine de développement — ce choix de device
+    n'a donc aucune influence sur le protocole de fitness lui-même.
+    """
+    if prefer:
+        return torch.device(prefer)
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # 1. Espace de recherche hiérarchique conditionnel
 # ══════════════════════════════════════════════════════════════════════════
@@ -544,6 +564,7 @@ def compute_fitness(
     seed: int = 42,
     theta_prune: float = 0.01,
     r2_threshold: float = 0.99,
+    enable_latency_penalty: bool = True,
 ) -> dict:
     """
     Fitness scientifique de l'Étape 2 (section 3) :
@@ -555,11 +576,21 @@ def compute_fitness(
         df_train_sample : DataFrame transactionnel brut (colonnes MoMTSim) — le pool
                            depuis lequel n_windows_eval fenêtres train sont tirées.
         df_val_sample   : idem pour la validation.
-        device          : device d'ENTRAÎNEMENT (la latence est mesurée sur CPU,
-                           indépendamment de ce paramètre — cf. _measure_latency_ms).
+        device          : device d'ENTRAÎNEMENT (ex. "mps" sur Apple M4). La latence
+                           est TOUJOURS mesurée sur CPU, indépendamment de ce paramètre
+                           (cf. _measure_latency_ms) — la contrainte USSD de production
+                           est une contrainte CPU, pas une propriété du device de dev.
         n_windows_eval  : nombre de fenêtres train/val sous-échantillonnées
                            (configurable, jamais codé en dur — section 4).
         n_epochs_eval   : nombre d'époques d'entraînement rapide (configurable).
+        enable_latency_penalty : si False, latence et penalty_lat sont TOUJOURS
+                           mesurées/calculées et conservées dans fitness_components
+                           (traçabilité), mais penalty_lat n'est PAS soustraite de
+                           fitness_total. Décision explicite de l'utilisateur pour ses
+                           propres runs (recherche sur GPU M4, hors contrainte USSD
+                           CPU de production) — le protocole du mémoire (seuil 100 ms,
+                           pénalité quadratique, mesure CPU/batch=256) reste intact et
+                           reproductible avec enable_latency_penalty=True (défaut).
 
     Returns:
         dict {'fitness_total', 'fitness_components', 'model_state', 'n_params',
@@ -657,9 +688,12 @@ def compute_fitness(
                                             theta=theta_prune, r2_threshold=r2_threshold)
         model.to(device)
 
+        # penalty_lat est TOUJOURS mesurée/calculée (traçabilité, section 20) ; seule
+        # sa contribution à fitness_total est conditionnelle à enable_latency_penalty.
+        penalty_lat_applied = penalty_lat if enable_latency_penalty else 0.0
         fitness_total = (
             0.40 * mcc_clipped + 0.25 * pr_auc - 0.15 * brier
-            + 0.10 * r2_symbolic - 0.10 * penalty_lat
+            + 0.10 * r2_symbolic - 0.10 * penalty_lat_applied
         )
 
         components = {
@@ -667,6 +701,7 @@ def compute_fitness(
             "PR_AUC": pr_auc, "Brier": brier,
             "R2_symbolic": r2_symbolic,
             "latency_ms": latency_ms, "penalty_lat": penalty_lat,
+            "penalty_lat_applied": enable_latency_penalty,
             "fitness_total": _safe_float(fitness_total, default=-10.0),
         }
         n_params = sum(p.numel() for p in model.parameters())
@@ -775,6 +810,8 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         self._best_result:     Optional[dict] = None
         self._input_size_used: Optional[int]  = None
         self._components: list = []   # fitness_components par individu de la génération courante
+        self._last_checkpointed_generation: Optional[int] = None
+        self._validation_full: dict = {}   # rempli par evaluate_best_on_full_validation()
 
     # ── Génération d'individus (redéfinition) ───────────────────────────────
 
@@ -994,18 +1031,44 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
     # ── Boucle principale ────────────────────────────────────────────────────
 
     def fit(self, df_train: pd.DataFrame, df_val: pd.DataFrame, device,
-            input_size_hint: Optional[int] = None) -> dict:
+            input_size_hint: Optional[int] = None,
+            resume_from_checkpoint: bool = False) -> dict:
         """
         Lance la recherche heuristique étendue. `df_train`/`df_val` sont les
         DataFrames transactionnels bruts (colonnes MoMTSim) ; compute_fitness
         en tire n_windows_eval fenêtres par évaluation (section 4).
+
+        resume_from_checkpoint : si True et qu'un search_checkpoint.json existe
+        dans scratch_dir, reprend exactement où la recherche précédente s'est
+        arrêtée (population, scores, journal, meilleur individu, taux de
+        mutation, compteur d'évaluations, état RNG) au lieu de repartir de
+        zéro — permet d'interrompre puis relancer un run long (section 11).
+        Si aucun checkpoint n'existe, démarre normalement (pas une erreur).
         """
-        self._initialiser()
-        self._population = [self._individu_aleatoire() for _ in range(self.taille_pop)]
-        self._components = [None] * self.taille_pop
+        resumed = False
+        if resume_from_checkpoint:
+            resumed = self._restore_from_checkpoint()
+            if resumed:
+                print(f"  → Reprise depuis le checkpoint : génération "
+                     f"{self._last_checkpointed_generation + 1}/{self.n_generations}, "
+                     f"{self._n_evaluations} évaluation(s) déjà réalisées, "
+                     f"best={self._best_score:.4f}")
+                # Le checkpoint capture l'état juste après évaluation de la génération
+                # sauvegardée, AVANT la transition (diversité/refroidissement/EDA/
+                # nouvelle population) vers la génération suivante : on rejoue cette
+                # transition une fois pour obtenir une population start_gen cohérente.
+                diversite_restauree = self._calculer_diversite()
+                self._prepare_next_generation(diversite_restauree)
+
+        if not resumed:
+            self._initialiser()
+            self._population = [self._individu_aleatoire() for _ in range(self.taille_pop)]
+            self._components = [None] * self.taille_pop
+
+        start_gen = (self._last_checkpointed_generation + 1) if resumed else 0
         sans_amelioration = 0
 
-        for gen in range(self.n_generations):
+        for gen in range(start_gen, self.n_generations):
             self._evaluer_generation(gen, df_train, df_val, device)
 
             ameliore = self._mettre_a_jour_best_extended()
@@ -1026,28 +1089,38 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                 print(f"  → Arrêt anticipé : {self.patience} générations sans amélioration.")
                 break
 
-            if diversite < self.min_diversite:
-                self._injecter_diversite(max(1, self.taille_pop // 4))
-
-            self._mutation_rate_courant = max(self.min_mutation_rate,
-                                              self._mutation_rate_courant * self.refroidissement)
-
-            n_eda_best = min(max(2, self.elite_size * 2), len(self._population))
-            freq = self._eda_frequences(n_eda_best)
-
-            elite_idx = self._indices_tries()[:self.elite_size]
-            e_ind    = [copy.deepcopy(self._population[i]) for i in elite_idx]
-            e_scores = [self._scores[i] for i in elite_idx]
-            e_comps  = [self._components[i] for i in elite_idx]
-            parents = self._selectionner_parents()
-            enfants = self._generer_enfants(parents, freq=freq)
-
-            self._population = e_ind + enfants
-            self._scores = e_scores + [None] * len(enfants)
-            self._components = e_comps + [None] * len(enfants)
+            self._prepare_next_generation(diversite)
 
         self._write_best_config_json()
         return {"params": copy.deepcopy(self._best_individual), "score": self._best_score}
+
+    def _prepare_next_generation(self, diversite: float) -> None:
+        """
+        Transition depuis la génération courante (déjà évaluée : self._population/
+        _scores/_components complets) vers la suivante : injection de diversité,
+        refroidissement de la mutation, modèle EDA, élites + enfants. Factorisé
+        pour être rejouable après resume() (section 11 : reprise exacte, y compris
+        la transition qui suit le dernier checkpoint sauvegardé).
+        """
+        if diversite < self.min_diversite:
+            self._injecter_diversite(max(1, self.taille_pop // 4))
+
+        self._mutation_rate_courant = max(self.min_mutation_rate,
+                                          self._mutation_rate_courant * self.refroidissement)
+
+        n_eda_best = min(max(2, self.elite_size * 2), len(self._population))
+        freq = self._eda_frequences(n_eda_best)
+
+        elite_idx = self._indices_tries()[:self.elite_size]
+        e_ind    = [copy.deepcopy(self._population[i]) for i in elite_idx]
+        e_scores = [self._scores[i] for i in elite_idx]
+        e_comps  = [self._components[i] for i in elite_idx]
+        parents = self._selectionner_parents()
+        enfants = self._generer_enfants(parents, freq=freq)
+
+        self._population = e_ind + enfants
+        self._scores = e_scores + [None] * len(enfants)
+        self._components = e_comps + [None] * len(enfants)
 
     def _evaluer_generation(self, gen: int, df_train, df_val, device) -> None:
         to_eval = [(i, ind) for i, ind in enumerate(self._population) if self._scores[i] is None]
@@ -1126,6 +1199,92 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         torch.save(payload, tmp_path)
         os.replace(tmp_path, self._best_candidate_path)
 
+    # ── Validation finale sur l'ensemble complet (section "Protocole
+    #    d'évaluation sur 50 000 fenêtres") ──────────────────────────────────
+
+    def evaluate_best_on_full_validation(
+        self, df_train_for_stats: pd.DataFrame, df_val_full: pd.DataFrame, device="cpu",
+    ) -> Optional[dict]:
+        """
+        Réévalue le meilleur modèle trouvé — poids déjà entraînés (best_candidate.pt),
+        AUCUN ré-entraînement ici — sur la TOTALITÉ des fenêtres de df_val_full
+        (pas de sous-échantillonnage, contrairement à compute_fitness). Conforme à
+        step_2_search_extension_and_analysis.tex : « Une validation finale sur
+        l'ensemble des 450 955 fenêtres de validation est conduite pour les 5
+        meilleures configurations issues de la recherche. »
+
+        Écart documenté : seule la MEILLEURE configuration est ré-évaluée ici (ses
+        poids entraînés sont les seuls conservés par ExtendedHeuristicSearch —
+        cf. _save_best_candidate) et non les 5 meilleures indépendamment, ce qui
+        nécessiterait de conserver 5 state_dict complets pendant la recherche
+        (non implémenté). export_top5() fournit les 5 configurations et leurs
+        métriques de recherche (sous-échantillonnées) pour audit ; seule celle
+        effectivement retenue (best_candidate.pt) est validée sur l'ensemble complet.
+
+        Les statistiques de standardisation sont ajustées sur df_train_for_stats
+        (même convention que compute_fitness : ajustement sur le train, jamais
+        sur la validation — évite la fuite de données) puis appliquées à
+        df_val_full.
+
+        Returns:
+            dict {'MCC', 'PR_AUC', 'Brier', 'AUC_ROC', 'n_windows'} ou None si
+            aucun meilleur modèle n'est disponible. Stocké dans self._validation_full
+            et repris tel quel dans heuristic_best_config.json (jamais de valeur
+            fabriquée : si le calcul échoue, la clé reste absente/null).
+        """
+        if self._best_individual is None:
+            self._warn_full_validation("aucun meilleur individu disponible (fit() non exécuté ?)")
+            return None
+        try:
+            from sklearn.metrics import (matthews_corrcoef, average_precision_score,
+                                         brier_score_loss, roc_auc_score)
+            model = self.get_best_model()
+            model.to(device).eval()
+
+            regime = _REGIME_TO_NIVEAU1[self._best_individual["Input_Regime"]]
+            df_tr, feature_cols = build_regime_frame(df_train_for_stats, regime)
+            df_vl, _            = build_regime_frame(df_val_full, regime)
+            stats = standardize(df_tr, feature_cols)
+            standardize(df_vl, feature_cols, stats=stats)
+
+            W = int(self._best_individual["W"])
+            X_vl, y_vl = build_windows(df_vl, W, feature_cols)
+            if len(X_vl) == 0:
+                self._warn_full_validation("0 fenêtre construite sur df_val_full")
+                return None
+
+            batch_size = int(self._best_individual["batch_size"])
+            X_vl_t = torch.from_numpy(X_vl).to(device)
+            scores_parts = []
+            with torch.no_grad():
+                for s in range(0, X_vl_t.shape[0], batch_size):
+                    scores_parts.append(model(X_vl_t[s:s + batch_size]))
+            scores = torch.cat(scores_parts).cpu().numpy()
+            scores = np.nan_to_num(scores, nan=0.5, posinf=1.0, neginf=0.0).clip(0.0, 1.0)
+
+            if len(np.unique(y_vl)) < 2:
+                self._warn_full_validation("une seule classe présente dans df_val_full — "
+                                           "métriques non calculables")
+                return None
+
+            result = {
+                "MCC": _safe_float(matthews_corrcoef(y_vl, (scores >= 0.5).astype(int))),
+                "PR_AUC": _safe_float(average_precision_score(y_vl, scores)),
+                "Brier": _safe_float(brier_score_loss(y_vl, scores), default=1.0),
+                "AUC_ROC": _safe_float(roc_auc_score(y_vl, scores)),
+                "n_windows": int(len(X_vl)),
+            }
+            self._validation_full = result
+            self._write_best_config_json()   # propage validation_full dans le fichier canonique
+            return result
+        except Exception as exc:   # noqa: BLE001 — ne jamais interrompre pour cette étape optionnelle
+            self._warn_full_validation(f"{type(exc).__name__}: {exc}")
+            return None
+
+    @staticmethod
+    def _warn_full_validation(msg: str) -> None:
+        print(f"  [avertissement] validation finale sur l'ensemble complet impossible : {msg}")
+
     def get_best_model(self, path: Optional[str] = None) -> torch.nn.Module:
         """
         Reconstruit un scoreur entraînable/inférable à partir de
@@ -1181,7 +1340,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                 "R2_symbolic": comp.get("R2_symbolic"), "latency_ms": comp.get("latency_ms"),
                 "penalty_lat": comp.get("penalty_lat"), "fitness_total": comp.get("fitness_total"),
             },
-            "validation_full": {},
+            "validation_full": dict(self._validation_full) if self._validation_full else {},
         }
         with open(self._best_config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2, ensure_ascii=False, default=str)
@@ -1207,14 +1366,17 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             json.dump(state, f, default=_json_rng_default, indent=2)
         os.replace(tmp_path, self._checkpoint_path)
 
-    def resume(self, checkpoint_path: Optional[str] = None) -> pd.DataFrame:
+    def _restore_from_checkpoint(self, checkpoint_path: Optional[str] = None) -> bool:
         """
-        Recharge l'état disponible (population, scores, historique, meilleur
-        individu, seed/RNG) et affiche/retourne un résumé par génération.
+        Recharge l'état complet depuis search_checkpoint.json (population, scores,
+        historique, meilleur individu, taux de mutation, compteur d'évaluations,
+        état RNG) ainsi que best_candidate.pt (state_dict du meilleur modèle, trop
+        volumineux pour le JSON) si présent. Retourne False si aucun checkpoint
+        n'existe (première exécution — pas une erreur).
         """
         path = checkpoint_path or self._checkpoint_path
         if not os.path.exists(path):
-            raise FileNotFoundError(f"Aucun checkpoint trouvé : {path}")
+            return False
         with open(path, encoding="utf-8") as f:
             state = json.load(f)
 
@@ -1227,6 +1389,34 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         self._mutation_rate_courant = state["mutation_rate_courant"]
         self._n_evaluations = state["n_evaluations"]
         self._rng.setstate(_json_rng_restore(state["rng_state"]))
+        self._last_checkpointed_generation = state["generation"]
+
+        if os.path.exists(self._best_candidate_path):
+            try:
+                import torch as _torch
+                payload = _torch.load(self._best_candidate_path, map_location="cpu", weights_only=False)
+                self._best_result = {
+                    "model_state": payload["model_state"], "input_size": payload.get("input_size"),
+                    "n_params": payload.get("n_params"),
+                    "hidden_size_gru_adjusted": payload.get("hidden_size_gru_adjusted"),
+                    "fitness_components": payload.get("fitness_components"),
+                }
+            except Exception as exc:   # noqa: BLE001 — reprise best-effort (section 11)
+                print(f"  [avertissement] best_candidate.pt illisible au resume ({exc}) — "
+                     "_best_result non restauré (get_best_model() restera indisponible).")
+        return True
+
+    def resume(self, checkpoint_path: Optional[str] = None) -> pd.DataFrame:
+        """
+        Recharge l'état disponible (population, scores, historique, meilleur
+        individu, seed/RNG) et affiche/retourne un résumé par génération.
+        Lève FileNotFoundError si aucun checkpoint n'existe (usage : inspection
+        explicite d'un run passé — cf. fit(resume_from_checkpoint=True) pour
+        reprendre une recherche interrompue sans erreur si rien n'est trouvé).
+        """
+        path = checkpoint_path or self._checkpoint_path
+        if not self._restore_from_checkpoint(path):
+            raise FileNotFoundError(f"Aucun checkpoint trouvé : {path}")
 
         rows = []
         for gen, group in pd.DataFrame(self._journal).groupby("generation"):
