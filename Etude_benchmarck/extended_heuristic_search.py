@@ -79,6 +79,16 @@ import numpy as np
 import pandas as pd
 import torch
 
+# Ce module vit désormais dans MKAN/Etude_benchmarck/ (déplacé depuis MKAN/ —
+# voir note de session) : edges, lstm_cell, gru_cell, niveau1_harness sont des
+# modules FRÈRES (même dossier, résolus automatiquement) ; heuristic_search,
+# loss, optim, symbolic vivent dans MKAN/ (le dossier parent) et doivent donc
+# être explicitement ajoutés à sys.path.
+_ETUDE_DIR = os.path.dirname(os.path.abspath(__file__))
+_MKAN_DIR  = os.path.dirname(_ETUDE_DIR)
+if _MKAN_DIR not in sys.path:
+    sys.path.insert(0, _MKAN_DIR)
+
 from heuristic_search import RechercheHeuristique
 from loss import mkan_total_loss
 from optim import DMLAdam
@@ -89,21 +99,13 @@ from optim import DMLAdam
 # dépendances optionnelles comme xgboost/kaleido non nécessaires ici).
 import importlib.util as _importlib_util
 if "MKAN" not in sys.modules:
-    _mkan_dir = os.path.dirname(os.path.abspath(__file__))
     _spec = _importlib_util.spec_from_loader("MKAN", loader=None, is_package=True)
     _mkan_pkg = _importlib_util.module_from_spec(_spec)
-    _mkan_pkg.__path__ = [_mkan_dir]
+    _mkan_pkg.__path__ = [_MKAN_DIR]
     sys.modules["MKAN"] = _mkan_pkg
 from MKAN.symbolic import fit_symbolic_best
 
 # ── Accès au registre de bases KAN interchangeables (Étape 1, Niveau 1) ──────
-# Etude_benchmarck/ n'est pas un package Python (pas de __init__.py) : ses
-# modules (edges, lstm_cell, gru_cell, niveau1_harness) s'importent en
-# ajoutant le dossier à sys.path, comme le fait niveau1_harness.py lui-même.
-_ETUDE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Etude_benchmarck")
-if _ETUDE_DIR not in sys.path:
-    sys.path.insert(0, _ETUDE_DIR)
-
 from edges import BASIS_REGISTRY                              # noqa: E402
 from lstm_cell import ConfigurableMKANScorer                  # noqa: E402
 from gru_cell import GRUMKANScorer, match_gru_hidden_size      # noqa: E402
@@ -757,8 +759,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                 os.makedirs(default_scratch, exist_ok=True)
                 scratch_dir = default_scratch
             except OSError:
-                scratch_dir = os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)), "checkpoints", "extended_search")
+                scratch_dir = os.path.join(_MKAN_DIR, "checkpoints", "extended_search")
         os.makedirs(scratch_dir, exist_ok=True)
         self.scratch_dir = scratch_dir
 
