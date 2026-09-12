@@ -541,7 +541,8 @@ def _compute_r2_symbolic(model: torch.nn.Module, x_pool: torch.Tensor,
     x_grid_t  = torch.linspace(-domain, domain, 100)
     x_grid_np = x_grid_t.cpu().numpy()
     n_ok = 0
-    for layer, i, j, _ in survivors:
+    from tqdm.auto import tqdm
+    for layer, i, j, _ in tqdm(survivors, desc="    R2_symbolic · arêtes", unit="arête", leave=False):
         n_in = layer.in_features
         x = torch.zeros(100, n_in)
         x[:, i] = x_grid_t
@@ -1068,7 +1069,11 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         start_gen = (self._last_checkpointed_generation + 1) if resumed else 0
         sans_amelioration = 0
 
-        for gen in range(start_gen, self.n_generations):
+        from tqdm.auto import tqdm
+        gen_pbar = tqdm(range(start_gen, self.n_generations), desc="Générations",
+                        unit="gén", leave=True, initial=start_gen, total=self.n_generations)
+
+        for gen in gen_pbar:
             self._evaluer_generation(gen, df_train, df_val, device)
 
             ameliore = self._mettre_a_jour_best_extended()
@@ -1077,6 +1082,8 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
 
             scores_valides = [s for s in self._scores if s is not None]
             moy = sum(scores_valides) / len(scores_valides) if scores_valides else float("nan")
+            gen_pbar.set_postfix({"best": f"{self._best_score:.4f}", "moy": f"{moy:.4f}",
+                                  "div": f"{diversite:.2f}", "μ": f"{self._mutation_rate_courant:.3f}"})
             print(f"Gén {gen + 1:02d}/{self.n_generations} | best={self._best_score:.4f} | "
                   f"moy={moy:.4f} | div={diversite:.2f} | "
                   f"μ={self._mutation_rate_courant:.3f} | "
@@ -1123,12 +1130,17 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         self._components = e_comps + [None] * len(enfants)
 
     def _evaluer_generation(self, gen: int, df_train, df_val, device) -> None:
+        from tqdm.auto import tqdm
+
         to_eval = [(i, ind) for i, ind in enumerate(self._population) if self._scores[i] is None]
-        for i, ind in to_eval:
+        pbar = tqdm(to_eval, desc=f"  ├─ gén {gen + 1}/{self.n_generations} · individus",
+                   unit="ind", leave=False)
+        for i, ind in pbar:
             result = self._evaluer_un(gen, i, ind, df_train, df_val, device)
             self._scores[i] = result["fitness_total"] if result["fitness_total"] is not None \
                 else self.invalid_fitness
             self._components[i] = result.get("fitness_components")
+            pbar.set_postfix({"fitness": f"{self._scores[i]:.4f}", "base": ind.get("Cell_Type")})
 
     def _evaluer_un(self, gen: int, individual_id: int, individual: dict,
                     df_train, df_val, device) -> dict:
