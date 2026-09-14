@@ -108,14 +108,45 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--export", action="store_true", default=True,
                    help="Lance results_export.py (--format all) sur scratch_dir en fin de run.")
     p.add_argument("--no-export", dest="export", action="store_false")
+
+    p.add_argument("--skip-sensitivity", dest="run_sensitivity", action="store_false",
+                   default=True,
+                   help="Ne pas lancer l'analyse de sensibilité (Sobol+Morris) après la "
+                        "recherche. Activée par défaut — coûteuse (jusqu'à N*(d+2) + "
+                        "r*(d+1) évaluations, d≈48 : potentiellement des dizaines de "
+                        "milliers d'entraînements avec les valeurs par défaut).")
+    p.add_argument("--sensitivity_N", type=int, default=1024,
+                   help="Protocole Étape 2 : taille d'échantillon Sobol (défaut 1024).")
+    p.add_argument("--sensitivity_r", type=int, default=10,
+                   help="Protocole Étape 2 : trajectoires Morris (défaut 10).")
+    p.add_argument("--sensitivity_n_epochs_eval", type=int, default=5,
+                   help="Protocole de sensibilité (RÉDUIT, distinct du protocole de "
+                        "recherche 50k/10 époques) : 5 époques par défaut.")
+    p.add_argument("--sensitivity_n_windows_eval", type=int, default=10_000,
+                   help="Protocole de sensibilité (RÉDUIT) : 10 000 fenêtres par défaut.")
+    p.add_argument("--sensitivity_max_workers", type=int, default=2,
+                   help="Processus parallèles pour Sobol/Morris (les workers de "
+                        "sensitivity_analysis.py évaluent toujours sur CPU, jamais MPS/CUDA, "
+                        "pour éviter la contention multi-process sur un device GPU).")
     return p
 
 
 def _load_datasets(args) -> "tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]":
-    for label, path in (("train", args.train_path), ("val", args.val_path),
-                        ("test", args.test_path)):
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Fichier {label} introuvable : {path}")
+    checks = [("train", args.train_path), ("val", args.val_path), ("test", args.test_path)]
+    missing = [(label, os.path.abspath(path)) for label, path in checks if not os.path.exists(path)]
+    if missing:
+        lines = [f"  - {label} : {path}" for label, path in missing]
+        raise FileNotFoundError(
+            "Fichier(s) de données introuvable(s) :\n" + "\n".join(lines) +
+            f"\n\nChemin racine déduit (2 niveaux au-dessus de run_search.py) : "
+            f"{_MODELISATION_ROOT}\n"
+            "Si ton arborescence locale diffère de MKAN/Etude_benchmarck/run_search.py, "
+            "passe les chemins explicitement, ex. :\n"
+            "  python run_search.py \\\n"
+            "    --train_path \"/chemin/vers/MOMTSIM/config/featuresLog.parquet\" \\\n"
+            "    --val_path   \"/chemin/vers/data/val_features.parquet\" \\\n"
+            "    --test_path  \"/chemin/vers/data/test_features.parquet\""
+        )
 
     t0 = time.time()
     print(f"Chargement train : {args.train_path}")
@@ -135,6 +166,66 @@ def _load_datasets(args) -> "tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]":
     print(f"  {len(df_test):,} transactions ({time.time() - t0:.1f}s)")
 
     return df_train, df_val, df_test
+
+
+def _run_sensitivity_analysis(args, search, df_train, df_val) -> None:
+    """
+    Lance l'analyse de sensibilité hiérarchique (Sobol + Morris) sur la
+    configuration trouvée par la recherche, à la suite de celle-ci.
+    Protocole RÉDUIT et DISTINCT de la recherche (n_epochs_eval/n_windows_eval
+    par défaut 5/10 000, jamais confondu avec 10/50 000) — cf. sensitivity_analysis.py.
+    Ne fait jamais échouer le run principal : toute erreur est journalisée puis
+    ignorée (la recherche et ses artefacts restent valides sans elle).
+    """
+    best_config_path = os.path.join(search.scratch_dir, "heuristic_best_config.json")
+    if not os.path.exists(best_config_path):
+        print("\n[avertissement] heuristic_best_config.json introuvable — "
+             "analyse de sensibilité ignorée (aucun individu valide trouvé ?).")
+        return
+
+    from sensitivity_analysis import HierarchicalSensitivityAnalyzer
+
+    print("\n" + "=" * 70)
+    print("Analyse de sensibilité hiérarchique (Sobol + Morris)")
+    print("=" * 70)
+
+    analyzer = HierarchicalSensitivityAnalyzer(
+        search_results_path=best_config_path, df_train=df_train, df_val=df_val,
+        device="cpu",   # les workers évaluent toujours sur CPU (cf. --sensitivity_max_workers)
+        n_epochs_eval=args.sensitivity_n_epochs_eval,
+        n_windows_eval=args.sensitivity_n_windows_eval,
+        max_workers=args.sensitivity_max_workers,
+        scratch_dir=search.scratch_dir, seed=args.seed,
+        # Même bascule que la recherche elle-même (attribut d'instance sérialisé
+        # vers les workers ProcessPoolExecutor — fonctionne en séquentiel ET en
+        # parallèle, contrairement à un monkeypatch de fonction module-level qui
+        # ne serait pas vu par des processus enfants réimportant le module).
+        enable_latency_penalty=args.enable_latency_penalty,
+    )
+    d = analyzer.dimension
+    n_morris = args.sensitivity_r * (d + 1)
+    n_sobol = args.sensitivity_N * (d + 2)
+    print(f"Dimension effective de l'espace : {d}")
+    print(f"Morris : r={args.sensitivity_r} trajectoires -> {n_morris:,} évaluations")
+    print(f"Sobol  : N={args.sensitivity_N} -> {n_sobol:,} évaluations")
+    print(f"Total estimé : {n_morris + n_sobol:,} entraînements "
+         f"({args.sensitivity_n_epochs_eval} époques, "
+         f"{args.sensitivity_n_windows_eval:,} fenêtres chacun, CPU, "
+         f"{args.sensitivity_max_workers} processus en parallèle)")
+    print(f"Reprise automatique en cas d'interruption via "
+         f"{os.path.join(search.scratch_dir, 'sobol_evaluations.npy')}")
+
+    try:
+        morris_payload = analyzer.run_morris(r=args.sensitivity_r, seed=args.seed)
+        sobol_payload = analyzer.run_sobol(N=args.sensitivity_N, calc_second_order=False,
+                                           seed=args.seed)
+        analyzer.write_sensitivity_rankings(sobol_payload, morris_payload)
+        analyzer.generate_decision_report(sobol_payload, morris_payload)
+        print(f"\nAnalyse de sensibilité terminée -> sensitivity_rankings.json, "
+             f"sensitivity_report.md, morris_results.json, sobol_results.json "
+             f"dans {search.scratch_dir}")
+    except Exception as exc:   # noqa: BLE001 — n'invalide jamais la recherche elle-même
+        print(f"  [avertissement] analyse de sensibilité échouée : {exc}")
 
 
 def main(argv=None) -> int:
@@ -192,6 +283,9 @@ def main(argv=None) -> int:
         search.plot_convergence()
     except Exception as exc:   # noqa: BLE001 — ne jamais faire échouer le run pour de la restitution
         print(f"  [avertissement] export top5/plot_convergence : {exc}")
+
+    if args.run_sensitivity:
+        _run_sensitivity_analysis(args, search, df_train, df_val)
 
     if args.export:
         try:

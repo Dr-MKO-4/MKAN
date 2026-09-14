@@ -199,6 +199,7 @@ class HierarchicalSensitivityAnalyzer:
         scratch_dir: Optional[str] = None,
         log_path: Optional[str] = None,
         seed: int = 42,
+        enable_latency_penalty: bool = True,
     ) -> None:
         self.df_train = df_train
         self.df_val = df_val
@@ -207,6 +208,12 @@ class HierarchicalSensitivityAnalyzer:
         self.n_windows_eval = n_windows_eval
         self.max_workers = max_workers
         self.seed = seed
+        # Attribut d'instance (et non un monkeypatch de module) : `self` est
+        # sérialisé vers les workers ProcessPoolExecutor (_init_worker), donc
+        # ce réglage s'applique aussi bien en séquentiel qu'en parallèle —
+        # contrairement à un patch de fonction globale, invisible des process
+        # enfants qui ré-importent le module frais.
+        self.enable_latency_penalty = enable_latency_penalty
 
         default_scratch = "/workspace/scratch"
         if scratch_dir is None:
@@ -467,7 +474,8 @@ class HierarchicalSensitivityAnalyzer:
                 raise ValueError("individu invalide (validate_individual)")
             result = compute_fitness(individual, self.df_train, self.df_val, "cpu",
                                      n_windows_eval=self.n_windows_eval,
-                                     n_epochs_eval=self.n_epochs_eval, seed=self.seed)
+                                     n_epochs_eval=self.n_epochs_eval, seed=self.seed,
+                                     enable_latency_penalty=self.enable_latency_penalty)
             if result["fitness_total"] is None:
                 raise RuntimeError(result.get("error", "compute_fitness a échoué"))
             fitness = result["fitness_total"]

@@ -331,26 +331,26 @@ class TestCheckpointAndBestModel:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 13. hidden_size_gru_adjusted = floor(sqrt(4/3) * hidden_size)
+# 13. hidden_size_gru_adjusted = floor((4/3) * hidden_size)
 # ══════════════════════════════════════════════════════════════════════════
 
 class TestGruAdjustment:
 
     @pytest.mark.parametrize("hidden_size", THETA_OPT_SPACE["hidden_size"])
-    def test_formula_matches_floor_sqrt_4_3(self, hidden_size):
-        expected = math.floor(math.sqrt(4.0 / 3.0) * hidden_size)
+    def test_formula_matches_floor_4_3(self, hidden_size):
+        expected = math.floor((4.0 / 3.0) * hidden_size)
         assert hidden_size_gru_adjusted(hidden_size) == expected
 
     def test_known_values_from_reference_table(self):
-        # Table iso_param du document step_2_search_extension_and_analysis.tex
-        assert hidden_size_gru_adjusted(8) == 9
-        assert hidden_size_gru_adjusted(16) == 18
-        assert hidden_size_gru_adjusted(32) == 36
-        assert hidden_size_gru_adjusted(64) == 73
-        assert hidden_size_gru_adjusted(128) == 147
+        # Table iso_param (corrigée) du document step_2_search_extension_and_analysis.tex
+        assert hidden_size_gru_adjusted(8) == 10
+        assert hidden_size_gru_adjusted(16) == 21
+        assert hidden_size_gru_adjusted(32) == 42
+        assert hidden_size_gru_adjusted(64) == 85
+        assert hidden_size_gru_adjusted(128) == 170
 
     def test_build_gru_model_uses_adjusted_hidden_size(self):
         ind = _minimal_individual(cell_type="GRUKANCell")
         ind["hidden_size"] = 16
         model = build_model_from_individual(ind, input_size=12)
-        assert model.hidden_size == hidden_size_gru_adjusted(16) == 18
+        assert model.hidden_size == hidden_size_gru_adjusted(16) == 21

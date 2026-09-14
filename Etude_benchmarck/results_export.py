@@ -69,6 +69,16 @@ TABLE_COLUMNS = ["Rang", "MCC", "PR_AUC", "Brier", "R2_symbolic", "Latence_ms",
                  "Base_Output", "Cell_Type", "Input_Regime", "hidden_size", "lr",
                  "lam", "mu1", "mu2", "W", "batch_size"]
 
+def _finite_max(values, fallback: float = 1.0) -> float:
+    """max() ignorant NaN/Inf — SALib peut renvoyer des indices non définis
+    (réponse dégénérée sur un petit échantillon) ; jamais transmis tel quel à
+    matplotlib set_xlim/set_ylim (ValueError "Axis limits cannot be NaN or Inf"
+    sinon, qui ferait échouer tout results_export.py)."""
+    finite = [v for v in values if isinstance(v, (int, float))
+             and not (math.isnan(v) or math.isinf(v))]
+    return max(finite) if finite else fallback
+
+
 EXPECTED_FILES = ["extended_search_log.jsonl", "best_candidate.pt",
                   "heuristic_best_config.json", "sensitivity_rankings.json",
                   "morris_results.json", "sobol_evaluations.npy",
@@ -532,7 +542,7 @@ class Step2ResultsExporter:
         ax.set_yticks(y_pos)
         ax.set_yticklabels(names, fontsize=7)
         ax.invert_yaxis()
-        ax.set_xlim(0, max(1.0, max(s_ti) * 1.1 if s_ti else 1.0))
+        ax.set_xlim(0, max(1.0, _finite_max(s_ti) * 1.1))
         ax.set_xlabel("Indice de Sobol")
         ax.set_title("Indices de Sobol totaux (S_Ti) — Étape 2 MKAN")
         ax.legend(loc="lower right", fontsize=8)
@@ -569,10 +579,12 @@ class Step2ResultsExporter:
             if r["mu_star"] > threshold or r["sigma"] > threshold:
                 ax.annotate(r["param_name"], (r["mu_star"], r["sigma"]), fontsize=6,
                            xytext=(3, 3), textcoords="offset points")
+        threshold = threshold if isinstance(threshold, (int, float)) and \
+            not (math.isnan(threshold) or math.isinf(threshold)) else 0.0
         ax.axvline(threshold, color="grey", linestyle=":", linewidth=1)
         ax.axhline(threshold, color="grey", linestyle=":", linewidth=1)
-        x_max = max(mu_star + [threshold]) * 1.15 + 1e-9
-        y_max = max(sigma + [threshold]) * 1.15 + 1e-9
+        x_max = _finite_max(mu_star + [threshold]) * 1.15 + 1e-9
+        y_max = _finite_max(sigma + [threshold]) * 1.15 + 1e-9
         ax.text(x_max * 0.98, y_max * 0.98, "Interactifs", ha="right", va="top",
                fontsize=8, color="grey")
         ax.text(x_max * 0.98, threshold * 0.5, "Linéaires importants", ha="right", va="center",

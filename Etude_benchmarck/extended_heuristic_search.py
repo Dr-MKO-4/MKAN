@@ -103,7 +103,7 @@ if "MKAN" not in sys.modules:
     _mkan_pkg = _importlib_util.module_from_spec(_spec)
     _mkan_pkg.__path__ = [_MKAN_DIR]
     sys.modules["MKAN"] = _mkan_pkg
-from MKAN.symbolic import fit_symbolic_best
+from MKAN.symbolic import SYMBOLIC_LIBRARY
 
 # ── Accès au registre de bases KAN interchangeables (Étape 1, Niveau 1) ──────
 from edges import BASIS_REGISTRY                              # noqa: E402
@@ -290,20 +290,25 @@ ESPACE_CONDITIONNEL.update({
 
 def hidden_size_gru_adjusted(hidden_size: int) -> int:
     """
-    d_h^GRU = floor(sqrt(4/3) * d_h)  (eq. ajustement_iso, section
+    d_h^GRU = floor((4/3) * d_h)  (eq. ajustement_iso, section
     "Égalisation du budget paramétrique").
 
-    Convention opérationnelle imposée par le document : NE PAS remplacer
-    par floor(4/3 * hidden_size), qui est la dérivation intermédiaire exacte
-    (eq. ajustement_exact) mais surestime systématiquement le budget GRU
-    après arrondi. Le dépôt possède par ailleurs match_gru_hidden_size()
-    (gru_cell.py), qui résout l'égalité paramétrique exacte par porte —
-    différente de cette formule fermée — utilisée par le protocole Niveau 1
-    (niveau1_harness.py) ; on ne la modifie pas. Cette fonction est l'ajout
-    minimal requis par la spécification de l'Étape 2, qui impose explicitement
-    la forme fermée floor(sqrt(4/3)*d_h) pour theta_struct.hidden_size_gru_adjusted.
+    3*d_h^GRU*(d_in+1) = 4*d_h*(d_in+1)  =>  d_h^GRU = (4/3)*d_h (ratio exact,
+    eq. ajustement_exact) ; la troncature directe vers l'entier inférieur
+    garantit P_GRU <= P_LSTM tout en restant la valeur entière la plus proche
+    de ce budget parmi celles qui satisfont cette contrainte.
+
+    CORRECTIF (ex-version de step_2_search_extension_and_analysis.tex utilisait
+    floor(sqrt(4/3)*d_h) ≈ floor(1.1547*d_h), présentée comme une "approximation
+    conservative couramment adoptée dans la littérature" — cette justification ne
+    correspondait à aucune pratique documentée et sous-budgétait la GRUKANCell de
+    ~16% par rapport à la troncature directe de 4/3 (erreur mathématique confirmée
+    et corrigée dans le document de référence). Le dépôt possède par ailleurs
+    match_gru_hidden_size() (gru_cell.py), qui résout l'égalité paramétrique exacte
+    par porte — différente de cette formule fermée — utilisée par le protocole
+    Niveau 1 (niveau1_harness.py) ; on ne la modifie pas.
     """
-    return math.floor(math.sqrt(4.0 / 3.0) * hidden_size)
+    return math.floor((4.0 / 3.0) * hidden_size)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -493,6 +498,25 @@ def _measure_latency_ms(model: torch.nn.Module, W: int, input_size: int,
     return best * 1000.0
 
 
+def _release_device_memory(device) -> None:
+    """
+    Force la libération de la mémoire GPU après une évaluation fitness (voir
+    commentaire dans compute_fitness). gc.collect() casse les cycles de
+    références autograd ; empty_cache() restitue les blocs libérés à
+    MPS/CUDA (sans quoi l'allocateur "caching" de chaque backend les retient
+    pour réutilisation interne, ce qui suffit à provoquer un OOM progressif
+    sur MPS après quelques générations, la VRAM unifiée d'Apple Silicon étant
+    partagée avec le reste du système).
+    """
+    import gc
+    gc.collect()
+    device_type = device.type if isinstance(device, torch.device) else str(device)
+    if device_type == "mps" and torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+    elif device_type == "cuda" and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def _penalty_latency(latency_ms: float, alpha_lat: float = 10.0) -> float:
     if latency_ms <= 100.0:
         return 0.0
@@ -503,19 +527,36 @@ def _compute_r2_symbolic(model: torch.nn.Module, x_pool: torch.Tensor,
                          theta: float = 0.01, r2_threshold: float = 0.99,
                          max_edges: int = 40, domain: float = 2.0) -> float:
     """
-    R2_symbolic (section 3, Ř² symbolique) : élagage (arête survivante si
-    L1 > theta) puis régression symbolique par gradient (symbolic.py,
-    identique en principe à scipy.optimize.curve_fit mais réutilise
-    l'infrastructure existante du dépôt — cf. docstring de module).
+    R2_symbolic (section 3, R² symbolique) : élagage (arête survivante si
+    L1 > theta) puis régression symbolique par gradient — mêmes familles de
+    fonctions, même objectif c*f(a*x+b)+d, mêmes hyperparamètres (150 pas
+    Adam, lr=0.05) que symbolic.fit_symbolic_best/SYMBOLIC_LIBRARY, mais
+    ENTIÈREMENT VECTORISÉE EN TENSEURS PYTORCH plutôt qu'ajustée arête par
+    arête : au lieu de E arêtes × 13 familles × 150 pas Adam SÉQUENTIELS
+    (jusqu'à 78 000 micro-optimisations Python par évaluation fitness — le
+    principal goulot d'étranglement mesuré de compute_fitness), les E arêtes
+    survivantes sont ajustées SIMULTANÉMENT pour chaque famille : les
+    paramètres a,b,c,d ont la forme (E,1) et une seule passe Adam à 150 pas
+    traite les E arêtes en parallèle (13 passes au total, contre E×13).
+
+    Équivalence garantie : la perte totale sommée sur les arêtes
+    (`per_edge_loss.sum()`) a, pour le paramètre a[e]/b[e]/c[e]/d[e] d'une
+    arête e, EXACTEMENT le même gradient que si cette arête était ajustée
+    seule avec sa propre perte moyenne sur 100 points — aucune arête n'est
+    couplée à une autre dans le calcul (produits/sommes strictement
+    élément-par-élément), donc la trajectoire d'optimisation de chaque
+    arête est identique au cas séquentiel. Une arête qui diverge (NaN/Inf)
+    est masquée (perte remplacée par une constante) pour ne jamais
+    contaminer par NaN le gradient des autres arêtes via la somme partagée,
+    et reçoit R²=-∞ (même convention que fit_symbolic_candidate).
 
     max_edges plafonne le nombre d'arêtes survivantes effectivement
-    évaluées symboliquement (coût O(arêtes) par régression à convergence),
-    pour borner le temps d'une évaluation fitness pendant la recherche —
-    même logique de tractabilité que audit.prune_and_extract(top_k=...).
+    évaluées symboliquement, pour borner le temps d'une évaluation fitness
+    pendant la recherche — même logique de tractabilité que
+    audit.prune_and_extract(top_k=...).
 
     Retourne 0.0 si aucune arête ne survit à l'élagage.
     """
-    gates = getattr(model.cell, "reset_gate", None)
     gate_modules = []
     for attr in ("forget_gate", "input_gate", "candidate_gate", "output_gate",
                 "reset_gate", "update_gate"):
@@ -527,32 +568,66 @@ def _compute_r2_symbolic(model: torch.nn.Module, x_pool: torch.Tensor,
     with torch.no_grad():
         for layer in gate_modules:
             edges = layer.edge_activations(x_pool)          # (batch, in, out)
-            l1_mat = edges.abs().mean(dim=0).cpu().numpy()
+            l1_mat = edges.abs().mean(dim=0)
             mask = l1_mat > theta
-            for i, j in np.argwhere(mask):
-                survivors.append((layer, int(i), int(j), float(l1_mat[i, j])))
+            for i, j in mask.nonzero(as_tuple=False).tolist():
+                survivors.append((layer, i, j, float(l1_mat[i, j])))
 
     if not survivors:
         return 0.0
 
     survivors.sort(key=lambda s: -s[3])
     survivors = survivors[:max_edges]
+    n_edges = len(survivors)
 
-    x_grid_t  = torch.linspace(-domain, domain, 100)
-    x_grid_np = x_grid_t.cpu().numpy()
-    n_ok = 0
+    # ── Extraction des courbes marginales (E passages forward bon marché :
+    #    100 points chacun — négligeable face à l'ajustement ci-dessous) ──────
+    x_grid = torch.linspace(-domain, domain, 100)
+    curves = torch.empty(n_edges, 100)
+    with torch.no_grad():
+        for e, (layer, i, j, _) in enumerate(survivors):
+            x = torch.zeros(100, layer.in_features)
+            x[:, i] = x_grid
+            curves[e] = layer.edge_activations(x)[:, i, j]
+
+    # ── Ajustement symbolique vectorisé : toutes les arêtes en parallèle,
+    #    une passe Adam (150 pas) par famille de fonctions ─────────────────
+    best_r2 = torch.full((n_edges,), -float("inf"))
+    x_row = x_grid.unsqueeze(0)   # (1, 100) — broadcast vers (E, 100)
+
     from tqdm.auto import tqdm
-    for layer, i, j, _ in tqdm(survivors, desc="    R2_symbolic · arêtes", unit="arête", leave=False):
-        n_in = layer.in_features
-        x = torch.zeros(100, n_in)
-        x[:, i] = x_grid_t
-        with torch.no_grad():
-            curve = layer.edge_activations(x)[:, i, j].cpu().numpy()
-        best = fit_symbolic_best(curve, x_grid_np, r2_threshold=r2_threshold)
-        if best["symbolifiable"]:
-            n_ok += 1
+    for fn in tqdm(SYMBOLIC_LIBRARY.values(), desc="    R2_symbolic - familles",
+                   unit="famille", leave=False):
+        a = torch.nn.Parameter(torch.ones(n_edges, 1))
+        b = torch.nn.Parameter(torch.zeros(n_edges, 1))
+        c = torch.nn.Parameter(torch.ones(n_edges, 1))
+        d = torch.nn.Parameter(torch.zeros(n_edges, 1))
+        optimizer = DMLAdam([a, b, c, d], lr=0.05)
 
-    return n_ok / len(survivors)
+        diverged = torch.zeros(n_edges, dtype=torch.bool)
+        for _ in range(150):
+            optimizer.zero_grad(set_to_none=True)
+            pred = c * fn(a * x_row + b) + d                # (E, 100)
+            bad = torch.isnan(pred).any(dim=1) | torch.isinf(pred).any(dim=1)
+            diverged = diverged | bad
+            per_edge_loss = (pred - curves).square().mean(dim=1)          # (E,)
+            # Masquage AVANT réduction : empêche une arête NaN de contaminer
+            # par la somme partagée le gradient des arêtes saines.
+            per_edge_loss = torch.where(diverged, torch.zeros_like(per_edge_loss), per_edge_loss)
+            per_edge_loss.sum().backward()
+            optimizer.step()
+
+        with torch.no_grad():
+            pred = c * fn(a * x_row + b) + d
+            ss_res = (curves - pred).square().sum(dim=1)
+            ss_tot = (curves - curves.mean(dim=1, keepdim=True)).square().sum(dim=1)
+            r2 = 1.0 - ss_res * (ss_tot + 1e-12).reciprocal()
+            r2 = torch.where(diverged | torch.isnan(r2) | torch.isinf(r2),
+                             torch.full_like(r2, -float("inf")), r2)
+        best_r2 = torch.maximum(best_r2, r2)
+
+    n_ok = int((best_r2 >= r2_threshold).sum().item())
+    return n_ok / n_edges
 
 
 def compute_fitness(
@@ -566,6 +641,7 @@ def compute_fitness(
     theta_prune: float = 0.01,
     r2_threshold: float = 0.99,
     enable_latency_penalty: bool = True,
+    window_cache: Optional[dict] = None,
 ) -> dict:
     """
     Fitness scientifique de l'Étape 2 (section 3) :
@@ -592,6 +668,18 @@ def compute_fitness(
                            CPU de production) — le protocole du mémoire (seuil 100 ms,
                            pénalité quadratique, mesure CPU/batch=256) reste intact et
                            reproductible avec enable_latency_penalty=True (défaut).
+        window_cache    : dict optionnel {(regime, W): (X_tr, y_tr, X_vl, y_vl, feature_cols)}
+                           tenu par l'appelant (ExtendedHeuristicSearch._window_cache),
+                           réutilisé entre individus partageant (Input_Regime, W).
+                           Optimisation pure — AUCUN effet sur le résultat numérique :
+                           `seed` est fixe sur toute une recherche, donc le sous-
+                           échantillon de n_windows_eval fenêtres tiré pour un (regime, W)
+                           donné est BIT-IDENTIQUE à chaque appel (même df source, même
+                           transform, même graine) ; le cache mémorise ce résultat déjà-
+                           subsamplé (~50 000 fenêtres, quelques dizaines de Mo) plutôt que
+                           de refaire le passage complet sur les millions de transactions
+                           brutes (construction des fenêtres compte par compte) à chaque
+                           individu. None (défaut) = comportement inchangé, aucun cache.
 
     Returns:
         dict {'fitness_total', 'fitness_components', 'model_state', 'n_params',
@@ -605,24 +693,35 @@ def compute_fitness(
     try:
         from niveau1_harness import PROCESSED_FEATURE_COLS  # noqa: F401  (documentation)
         regime = _REGIME_TO_NIVEAU1[config["Input_Regime"]]
-        df_tr, feature_cols = build_regime_frame(df_train_sample, regime)
-        df_vl, _            = build_regime_frame(df_val_sample, regime)
-        stats = standardize(df_tr, feature_cols)
-        standardize(df_vl, feature_cols, stats=stats)
-
         W = int(config["W"])
-        X_tr, y_tr = build_windows(df_tr, W, feature_cols)
-        X_vl, y_vl = build_windows(df_vl, W, feature_cols)
-        if len(X_tr) == 0 or len(X_vl) == 0:
-            raise ValueError("Aucune fenêtre construite (comptes < W transactions)")
+        cache_key = (regime, W)
 
-        rng_np = np.random.default_rng(seed)
-        if len(X_tr) > n_windows_eval:
-            idx = np.sort(rng_np.choice(len(X_tr), n_windows_eval, replace=False))
-            X_tr, y_tr = X_tr[idx], y_tr[idx]
-        if len(X_vl) > n_windows_eval:
-            idx = np.sort(rng_np.choice(len(X_vl), n_windows_eval, replace=False))
-            X_vl, y_vl = X_vl[idx], y_vl[idx]
+        if window_cache is not None and cache_key in window_cache:
+            X_tr, y_tr, X_vl, y_vl, feature_cols = window_cache[cache_key]
+        else:
+            df_tr, feature_cols = build_regime_frame(df_train_sample, regime)
+            df_vl, _            = build_regime_frame(df_val_sample, regime)
+            stats = standardize(df_tr, feature_cols)
+            standardize(df_vl, feature_cols, stats=stats)
+
+            X_tr, y_tr = build_windows(df_tr, W, feature_cols)
+            X_vl, y_vl = build_windows(df_vl, W, feature_cols)
+            if len(X_tr) == 0 or len(X_vl) == 0:
+                raise ValueError("Aucune fenêtre construite (comptes < W transactions)")
+
+            rng_np = np.random.default_rng(seed)
+            if len(X_tr) > n_windows_eval:
+                idx = np.sort(rng_np.choice(len(X_tr), n_windows_eval, replace=False))
+                X_tr, y_tr = X_tr[idx], y_tr[idx]
+            if len(X_vl) > n_windows_eval:
+                idx = np.sort(rng_np.choice(len(X_vl), n_windows_eval, replace=False))
+                X_vl, y_vl = X_vl[idx], y_vl[idx]
+
+            # Mémorisé APRÈS sous-échantillonnage : ~50 000 fenêtres (~qq dizaines
+            # de Mo), jamais le pool complet pré-subsampling (potentiellement
+            # plusieurs millions de fenêtres sur featuresLog.parquet en entier).
+            if window_cache is not None:
+                window_cache[cache_key] = (X_tr, y_tr, X_vl, y_vl, feature_cols)
 
         input_size = len(feature_cols)
         torch.manual_seed(seed)
@@ -636,8 +735,27 @@ def compute_fitness(
         n = X_tr_t.shape[0]
 
         model.train()
-        for _ in range(n_epochs_eval):
+        from tqdm.auto import tqdm
+        # Seule étape sans retour visuel jusqu'ici : jusqu'à n_epochs_eval ×
+        # (n_windows_eval/batch_size) pas — ex. 10 × (50000/32) ≈ 15 600 pas
+        # pour un petit batch_size, potentiellement la portion la plus longue
+        # d'une évaluation individuelle. leave=False : disparaît une fois
+        # l'individu terminé, la barre "individus" au-dessus reste la trace
+        # persistante (cf. _evaluer_generation).
+        epoch_pbar = tqdm(range(n_epochs_eval), desc="      entraînement", unit="ép", leave=False)
+        for _ in epoch_pbar:
             perm = torch.randperm(n, device=device)
+            # Accumulation en TENSEUR (pas de .item() par batch) : un .item()
+            # par batch forcerait une synchronisation GPU à chaque pas (casse
+            # le pipeline asynchrone MPS/CUDA — exactement le genre de coût
+            # qu'on vient d'éliminer ailleurs). Une seule synchronisation par
+            # époque (après la boucle), coût négligeable.
+            # Non in-place (epoch_loss_sum = ... + ...) : mkan_total_loss peut
+            # renvoyer un tenseur de forme (1,) (reg_l1/reg_entropy sont des
+            # torch.zeros(1,...) dans MKANScorer.forward), incompatible avec
+            # un += in-place sur un accumulateur scalaire strict.
+            epoch_loss_sum = torch.zeros((), device=device)
+            epoch_n_batches = 0
             for s in range(0, n, batch_size):
                 idx = perm[s:s + batch_size]
                 xb, yb = X_tr_t[idx], y_tr_t[idx]
@@ -650,6 +768,9 @@ def compute_fitness(
                 loss_total.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
+                epoch_loss_sum = epoch_loss_sum + loss_total.detach().reshape(())
+                epoch_n_batches += 1
+            epoch_pbar.set_postfix({"loss": f"{(epoch_loss_sum / max(1, epoch_n_batches)).item():.4f}"})
 
         model.eval()
         X_vl_t = torch.from_numpy(X_vl).to(device)
@@ -729,6 +850,18 @@ def compute_fitness(
             "input_size": None,
             "error": f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=3)}",
         }
+    finally:
+        # Libération explicite — critique sur MPS/CUDA (bug rapporté : "MPS backend
+        # out of memory" après quelques générations). Chaque appel construit un
+        # nouveau modèle + optimiseur + tenseurs d'entraînement sur `device` ; les
+        # graphes autograd forment des cycles de références que le comptage de
+        # références de Python ne collecte pas seul (il faut gc.collect()), et
+        # l'allocateur "caching" de MPS/CUDA ne restitue pas la mémoire libérée au
+        # driver tant que empty_cache() n'est pas appelé explicitement — sans ces
+        # deux étapes, la mémoire GPU croît de façon monotone au fil des individus/
+        # générations jusqu'à l'OOM. Le state_dict retourné est déjà cloné sur CPU
+        # (ligne "model_state": ...) : cette purge n'affecte jamais la valeur renvoyée.
+        _release_device_memory(device)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -811,6 +944,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         self._best_result:     Optional[dict] = None
         self._input_size_used: Optional[int]  = None
         self._components: list = []   # fitness_components par individu de la génération courante
+        self._window_cache: dict = {}   # (regime, W) -> fenêtres sous-échantillonnées déjà construites
         self._last_checkpointed_generation: Optional[int] = None
         self._validation_full: dict = {}   # rempli par evaluate_best_on_full_validation()
 
@@ -1050,7 +1184,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         if resume_from_checkpoint:
             resumed = self._restore_from_checkpoint()
             if resumed:
-                print(f"  → Reprise depuis le checkpoint : génération "
+                print(f"  -> Reprise depuis le checkpoint : génération "
                      f"{self._last_checkpointed_generation + 1}/{self.n_generations}, "
                      f"{self._n_evaluations} évaluation(s) déjà réalisées, "
                      f"best={self._best_score:.4f}")
@@ -1070,8 +1204,10 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         sans_amelioration = 0
 
         from tqdm.auto import tqdm
+        _BAR_FMT = "{l_bar}{bar:28}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
         gen_pbar = tqdm(range(start_gen, self.n_generations), desc="Générations",
-                        unit="gén", leave=True, initial=start_gen, total=self.n_generations)
+                        unit="gén", leave=True, initial=start_gen, total=self.n_generations,
+                        bar_format=_BAR_FMT, colour="cyan")
 
         for gen in gen_pbar:
             self._evaluer_generation(gen, df_train, df_val, device)
@@ -1082,18 +1218,29 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
 
             scores_valides = [s for s in self._scores if s is not None]
             moy = sum(scores_valides) / len(scores_valides) if scores_valides else float("nan")
+            # Clés de postfix/print en ASCII (pas "μ") : certains terminaux (notamment
+            # Windows avec la page de code cp1252 par défaut) plantent sur des
+            # caractères hors de leur jeu de caractères lors de l'écriture tqdm —
+            # constaté en pratique (UnicodeEncodeError sur "μ"/"→"/"↑"/"├" dans
+            # gen_pbar.write). Les commentaires/docstrings du code gardent leurs
+            # accents (jamais imprimés sur un terminal), seule la sortie console
+            # réellement écrite au fil de l'exécution est restreinte à l'ASCII pour
+            # rester robuste sur n'importe quelle plateforme/encodage de terminal.
             gen_pbar.set_postfix({"best": f"{self._best_score:.4f}", "moy": f"{moy:.4f}",
-                                  "div": f"{diversite:.2f}", "μ": f"{self._mutation_rate_courant:.3f}"})
-            print(f"Gén {gen + 1:02d}/{self.n_generations} | best={self._best_score:.4f} | "
-                  f"moy={moy:.4f} | div={diversite:.2f} | "
-                  f"μ={self._mutation_rate_courant:.3f} | "
-                  f"{'↑ AMÉLIORATION' if ameliore else '='}")
+                                  "div": f"{diversite:.2f}", "mu": f"{self._mutation_rate_courant:.3f}"})
+            # tqdm.write() (et non print()) : efface proprement la barre active, écrit
+            # la ligne, puis la redessine en dessous — évite le rendu cassé/dupliqué
+            # que print() provoque au milieu d'une barre tqdm ouverte (leave=True).
+            gen_pbar.write(f"Gen {gen + 1:02d}/{self.n_generations} | best={self._best_score:.4f} | "
+                          f"moy={moy:.4f} | div={diversite:.2f} | "
+                          f"mu={self._mutation_rate_courant:.3f} | "
+                          f"{'AMELIORATION' if ameliore else '='}")
 
             self._save_checkpoint(gen)
 
             sans_amelioration = 0 if ameliore else sans_amelioration + 1
             if sans_amelioration >= self.patience:
-                print(f"  → Arrêt anticipé : {self.patience} générations sans amélioration.")
+                gen_pbar.write(f"  -> Arret anticipe : {self.patience} generations sans amelioration.")
                 break
 
             self._prepare_next_generation(diversite)
@@ -1133,8 +1280,9 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         from tqdm.auto import tqdm
 
         to_eval = [(i, ind) for i, ind in enumerate(self._population) if self._scores[i] is None]
-        pbar = tqdm(to_eval, desc=f"  ├─ gén {gen + 1}/{self.n_generations} · individus",
-                   unit="ind", leave=False)
+        pbar = tqdm(to_eval, desc=f"  |- gen {gen + 1}/{self.n_generations} individus",
+                   unit="ind", leave=False, colour="green",
+                   bar_format="{l_bar}{bar:28}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}{postfix}]")
         for i, ind in pbar:
             result = self._evaluer_un(gen, i, ind, df_train, df_val, device)
             self._scores[i] = result["fitness_total"] if result["fitness_total"] is not None \
@@ -1151,13 +1299,20 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             try:
                 result = compute_fitness(individual, df_train, df_val, device,
                                          n_windows_eval=self.n_windows_eval,
-                                         n_epochs_eval=self.n_epochs_eval, seed=self.seed)
+                                         n_epochs_eval=self.n_epochs_eval, seed=self.seed,
+                                         window_cache=self._window_cache)
             except Exception as exc:   # noqa: BLE001 — robustesse absolue (section 14)
                 result = {"fitness_total": None, "fitness_components": None,
                           "model_state": None,
                           "error": f"exception non interceptée par compute_fitness : {exc}"}
             if result["fitness_total"] is None:
-                print(f"  [ERREUR] gen={gen} ind={individual_id} : {result.get('error')}")
+                # tqdm.write() (pas print()) : n'importe quelle barre active en cours
+                # est proprement effacée/redessinée autour du message (évite le
+                # rendu cassé signalé). Une seule ligne ici (type + message) ; la
+                # trace complète reste dans extended_search_log.jsonl (_log_evaluation).
+                _err = result.get("error") or ""
+                from tqdm.auto import tqdm as _tqdm
+                _tqdm.write(f"  [ERREUR] gén={gen} ind={individual_id} : {_err.splitlines()[0] if _err else '?'}")
                 result = {**result, "fitness_total": self.invalid_fitness}
 
         with self._log_lock:
@@ -1169,6 +1324,11 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                 self._best_result = result
                 self._best_individual = copy.deepcopy(individual)
                 self._save_best_candidate()
+                # heuristic_best_config.json à jour à CHAQUE amélioration (pas
+                # seulement en fin de fit()) : un crash/kill en cours de route
+                # laisse quand même un fichier canonique exploitable par
+                # results_export.py, sans devoir attendre la fin de la recherche.
+                self._write_best_config_json()
         return result
 
     def _log_evaluation(self, generation: int, individual_id: int, config: dict, result: dict) -> None:
@@ -1266,12 +1426,17 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                 return None
 
             batch_size = int(self._best_individual["batch_size"])
-            X_vl_t = torch.from_numpy(X_vl).to(device)
+            # X_vl reste sur CPU ; seul le batch courant est transféré sur `device`
+            # (jusqu'à 450 955 fenêtres en une seule fois serait ~qq centaines de Mo
+            # à ~1 Go selon W — significatif sur la mémoire unifiée d'Apple Silicon,
+            # partagée avec le reste du système).
+            X_vl_cpu = torch.from_numpy(X_vl)
             scores_parts = []
             with torch.no_grad():
-                for s in range(0, X_vl_t.shape[0], batch_size):
-                    scores_parts.append(model(X_vl_t[s:s + batch_size]))
-            scores = torch.cat(scores_parts).cpu().numpy()
+                for s in range(0, X_vl_cpu.shape[0], batch_size):
+                    xb = X_vl_cpu[s:s + batch_size].to(device)
+                    scores_parts.append(model(xb).cpu())
+            scores = torch.cat(scores_parts).numpy()
             scores = np.nan_to_num(scores, nan=0.5, posinf=1.0, neginf=0.0).clip(0.0, 1.0)
 
             if len(np.unique(y_vl)) < 2:
@@ -1292,10 +1457,13 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         except Exception as exc:   # noqa: BLE001 — ne jamais interrompre pour cette étape optionnelle
             self._warn_full_validation(f"{type(exc).__name__}: {exc}")
             return None
+        finally:
+            _release_device_memory(device)   # cf. commentaire dans compute_fitness
 
     @staticmethod
     def _warn_full_validation(msg: str) -> None:
-        print(f"  [avertissement] validation finale sur l'ensemble complet impossible : {msg}")
+        from tqdm.auto import tqdm
+        tqdm.write(f"  [avertissement] validation finale sur l'ensemble complet impossible : {msg}")
 
     def get_best_model(self, path: Optional[str] = None) -> torch.nn.Module:
         """
