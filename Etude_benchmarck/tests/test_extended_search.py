@@ -25,6 +25,8 @@ from extended_heuristic_search import (          # noqa: E402
     BASE_PARAM_SPACE, THETA_OPT_SPACE, CONTINUOUS_THETA_OPT,
     sample_individual, validate_individual, build_model_from_individual,
     hidden_size_gru_adjusted, compute_fitness,
+    _objective_vector, _constraint_violation, _constrained_dominates,
+    _fast_non_dominated_sort, _crowding_distance, LATENCY_CONSTRAINT_MS,
 )
 
 
@@ -354,3 +356,141 @@ class TestGruAdjustment:
         ind["hidden_size"] = 16
         model = build_model_from_individual(ind, input_size=12)
         assert model.hidden_size == hidden_size_gru_adjusted(16) == 21
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 14. NSGA-II : dominance contrainte, tri non-dominé, crowding, sélection
+# ══════════════════════════════════════════════════════════════════════════
+
+def _fc(mcc, pr, brier, r2, lat):
+    return {"MCC_clipped": mcc, "PR_AUC": pr, "Brier": brier, "R2_symbolic": r2,
+           "latency_ms": lat, "fitness_total": 0.0}
+
+
+class TestNsga2Core:
+
+    def test_objective_vector_inverts_brier_only(self):
+        obj = _objective_vector(_fc(0.5, 0.6, 0.2, 0.3, 50))
+        assert obj == (0.5, 0.6, -0.2, 0.3)   # 4 objectifs ; latence absente (contrainte, pas objectif)
+
+    def test_constraint_violation_zero_under_threshold(self):
+        assert _constraint_violation(_fc(0, 0, 0, 0, 50)) == 0.0
+        assert _constraint_violation(_fc(0, 0, 0, 0, LATENCY_CONSTRAINT_MS)) == 0.0
+
+    def test_constraint_violation_positive_over_threshold(self):
+        assert _constraint_violation(_fc(0, 0, 0, 0, 150)) == pytest.approx(50.0)
+
+    def test_dominance_strict(self):
+        a = _objective_vector(_fc(0.6, 0.6, 0.1, 0.5, 50))
+        b = _objective_vector(_fc(0.4, 0.4, 0.3, 0.2, 50))
+        assert _constrained_dominates(a, 0.0, b, 0.0) is True
+        assert _constrained_dominates(b, 0.0, a, 0.0) is False
+
+    def test_mutual_non_dominance(self):
+        a = _objective_vector(_fc(0.7, 0.3, 0.2, 0.3, 50))   # meilleur MCC
+        b = _objective_vector(_fc(0.3, 0.7, 0.2, 0.3, 50))   # meilleur PR_AUC
+        assert _constrained_dominates(a, 0.0, b, 0.0) is False
+        assert _constrained_dominates(b, 0.0, a, 0.0) is False
+
+    def test_feasible_always_dominates_infeasible(self):
+        """Un individu réalisable domine toujours un individu irréalisable,
+        même strictement pire sur les 4 objectifs libres (Deb et al. 2002)."""
+        feasible = _objective_vector(_fc(0.3, 0.3, 0.3, 0.1, 50))
+        infeasible = _objective_vector(_fc(0.9, 0.9, 0.05, 0.9, 200))
+        cv_feas = _constraint_violation(_fc(0, 0, 0, 0, 50))
+        cv_infeas = _constraint_violation(_fc(0, 0, 0, 0, 200))
+        assert _constrained_dominates(feasible, cv_feas, infeasible, cv_infeas) is True
+        assert _constrained_dominates(infeasible, cv_infeas, feasible, cv_feas) is False
+
+    def test_less_violation_dominates_among_infeasible(self):
+        worse = _constraint_violation(_fc(0, 0, 0, 0, 300))
+        better = _constraint_violation(_fc(0, 0, 0, 0, 110))
+        obj = _objective_vector(_fc(0.1, 0.1, 0.1, 0.1, 0))   # objectifs identiques
+        assert _constrained_dominates(obj, better, obj, worse) is True
+        assert _constrained_dominates(obj, worse, obj, better) is False
+
+    def test_fast_non_dominated_sort_known_fronts(self):
+        individuals = [
+            _fc(0.9, 0.9, 0.05, 0.9, 50),   # domine tout -> front 0
+            _fc(0.5, 0.3, 0.2, 0.3, 50),    # front 1
+            _fc(0.3, 0.5, 0.2, 0.3, 50),    # non-dominé vs le précédent -> front 1
+        ]
+        objs = [_objective_vector(c) for c in individuals]
+        cvs = [_constraint_violation(c) for c in individuals]
+        fronts = _fast_non_dominated_sort(objs, cvs)
+        assert fronts[0] == [0]
+        assert set(fronts[1]) == {1, 2}
+
+    def test_crowding_distance_extremes_are_infinite(self):
+        front = [(0.1, 0.5, -0.5, 0.5), (0.5, 0.5, -0.5, 0.5), (0.9, 0.5, -0.5, 0.5)]
+        cd = _crowding_distance(front)
+        assert cd[0] == float("inf")
+        assert cd[2] == float("inf")
+        assert cd[1] < float("inf")
+
+    def test_crowding_distance_empty_and_pair(self):
+        assert _crowding_distance([]) == []
+        pair = _crowding_distance([(0.1,), (0.9,)])
+        assert pair == [float("inf"), float("inf")]
+
+    def test_archive_never_contains_a_dominated_pair(self):
+        """Invariant structurel : après _update_pareto_archive, aucun élément
+        de l'archive n'est dominé par un autre (propriété d'un front valide)."""
+        search = ExtendedHeuristicSearch(population_size=6, elite_size=1,
+                                         n_generations=1, tournament_size=2)
+        rng_individuals = [sample_individual() for _ in range(6)]
+        search._population = rng_individuals
+        search._components = [
+            _fc(0.9, 0.9, 0.05, 0.9, 50), _fc(0.1, 0.1, 0.5, 0.1, 50),
+            _fc(0.5, 0.3, 0.2, 0.3, 50), _fc(0.3, 0.5, 0.2, 0.3, 50),
+            _fc(0.9, 0.9, 0.05, 0.9, 200),   # domine tout sur les objectifs mais irréalisable
+            _fc(0.2, 0.2, 0.2, 0.2, 90),
+        ]
+        search._update_pareto_archive()
+        archive = search._pareto_archive
+        assert len(archive) >= 1
+        for i, a in enumerate(archive):
+            for j, b in enumerate(archive):
+                if i == j:
+                    continue
+                oa, ob = _objective_vector(a["fitness_components"]), _objective_vector(b["fitness_components"])
+                cva = _constraint_violation(a["fitness_components"])
+                cvb = _constraint_violation(b["fitness_components"])
+                assert not _constrained_dominates(oa, cva, ob, cvb)
+
+    def test_indices_tries_orders_by_rank_then_crowding(self):
+        search = ExtendedHeuristicSearch(population_size=3, elite_size=1,
+                                         n_generations=1, tournament_size=2)
+        search._population = [sample_individual() for _ in range(3)]
+        search._components = [
+            _fc(0.9, 0.9, 0.05, 0.9, 50),   # rang 0
+            _fc(0.5, 0.3, 0.2, 0.3, 50),    # rang 1
+            _fc(0.3, 0.5, 0.2, 0.3, 50),    # rang 1
+        ]
+        search._compute_rank_and_crowding()
+        order = search._indices_tries()
+        assert order[0] == 0   # seul individu de rang 0, toujours en tête
+        assert set(order[1:]) == {1, 2}
+
+    def test_selectionner_parents_no_roulette_correct_size(self):
+        """NSGA-II : élites + tournoi uniquement, taille de pool correcte."""
+        search = ExtendedHeuristicSearch(population_size=6, elite_size=2,
+                                         n_generations=1, tournament_size=2)
+        search._population = [sample_individual() for _ in range(6)]
+        search._components = [_fc(i / 10, i / 10, 0.2, 0.1, 50) for i in range(6)]
+        search._scores = [c["fitness_total"] for c in search._components]
+        search._compute_rank_and_crowding()
+        parents = search._selectionner_parents()
+        assert len(parents) == search.taille_pop
+
+    def test_enforce_latency_constraint_false_ignores_violation(self):
+        """Avec enforce_latency_constraint=False, deux individus à latence très
+        différente mais objectifs identiques doivent être mutuellement non-dominés
+        (pas de contrainte appliquée par _compute_rank_and_crowding)."""
+        search = ExtendedHeuristicSearch(population_size=2, elite_size=1,
+                                         n_generations=1, tournament_size=2,
+                                         enforce_latency_constraint=False)
+        search._population = [sample_individual(), sample_individual()]
+        search._components = [_fc(0.5, 0.5, 0.2, 0.3, 50), _fc(0.5, 0.5, 0.2, 0.3, 500)]
+        search._compute_rank_and_crowding()
+        assert search._rank[0] == search._rank[1] == 0   # même front : latence ignorée

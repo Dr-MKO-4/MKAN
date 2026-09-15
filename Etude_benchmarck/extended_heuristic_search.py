@@ -523,6 +523,126 @@ def _penalty_latency(latency_ms: float, alpha_lat: float = 10.0) -> float:
     return alpha_lat * ((latency_ms - 100.0) / 100.0) ** 2
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# NSGA-II — tri par dominance contrainte (Deb, Pratab, Agarwal, Meyarivan,
+# 2002, "A Fast and Elitist Multiobjective Genetic Algorithm: NSGA-II",
+# IEEE Trans. Evolutionary Computation 6(2):182-197). Remplace la fitness
+# scalaire agrégée comme mécanisme DE SÉLECTION de la recherche (élitisme,
+# tournoi, injection de diversité, modèle EDA) — cf. ExtendedHeuristicSearch.
+# La latence n'est PAS un 5e objectif libre à minimiser indéfiniment : elle
+# reste une CONTRAINTE de seuil (100 ms, protocole du mémoire) traitée par le
+# principe de dominance contrainte (§II.B de Deb et al.), fidèle à la
+# sémantique opérationnelle (un individu à 5 ms n'est pas "meilleur" qu'un
+# individu à 90 ms — les deux respectent la contrainte USSD).
+# ══════════════════════════════════════════════════════════════════════════
+
+LATENCY_CONSTRAINT_MS = 100.0   # seuil USSD du protocole — inchangé
+
+
+def _objective_vector(fitness_components: dict) -> tuple:
+    """4 objectifs à MAXIMISER (dominance de Pareto) : MCC_clipped, PR_AUC,
+    -Brier (minimiser Brier <=> maximiser son opposé), R2_symbolic."""
+    return (
+        fitness_components["MCC_clipped"],
+        fitness_components["PR_AUC"],
+        -fitness_components["Brier"],
+        fitness_components["R2_symbolic"],
+    )
+
+
+def _constraint_violation(fitness_components: dict,
+                          threshold_ms: float = LATENCY_CONSTRAINT_MS) -> float:
+    """Violation de la contrainte de latence (0.0 si respectée)."""
+    return max(0.0, fitness_components["latency_ms"] - threshold_ms)
+
+
+def _constrained_dominates(obj_a: tuple, cv_a: float, obj_b: tuple, cv_b: float) -> bool:
+    """
+    Principe de dominance contrainte (Deb et al., 2002, §II.B) : a domine b si
+      (a) a est réalisable et b ne l'est pas, OU
+      (b) les deux sont irréalisables et a viole moins la contrainte, OU
+      (c) les deux sont réalisables et a domine b au sens de Pareto standard
+          (meilleur ou égal sur tous les objectifs, strictement meilleur sur
+          au moins un).
+    """
+    feas_a, feas_b = cv_a <= 0.0, cv_b <= 0.0
+    if feas_a and not feas_b:
+        return True
+    if not feas_a and feas_b:
+        return False
+    if not feas_a and not feas_b:
+        return cv_a < cv_b
+    not_worse = all(a >= b for a, b in zip(obj_a, obj_b))
+    strictly_better = any(a > b for a, b in zip(obj_a, obj_b))
+    return not_worse and strictly_better
+
+
+def _fast_non_dominated_sort(objectives: list, violations: list) -> list:
+    """
+    Tri non-dominé rapide (Deb et al., 2002, Algorithme 1) : partitionne les
+    indices [0..n) en fronts F1 (non-dominés), F2 (dominés uniquement par des
+    individus de F1), etc. Retourne une liste de fronts (listes d'indices) ;
+    complexité O(M·N²), négligeable aux tailles de population utilisées ici.
+    """
+    n = len(objectives)
+    dominated_by = [set() for _ in range(n)]
+    domination_count = [0] * n
+    fronts = [[]]
+
+    for p in range(n):
+        for q in range(n):
+            if p == q:
+                continue
+            if _constrained_dominates(objectives[p], violations[p], objectives[q], violations[q]):
+                dominated_by[p].add(q)
+            elif _constrained_dominates(objectives[q], violations[q], objectives[p], violations[p]):
+                domination_count[p] += 1
+        if domination_count[p] == 0:
+            fronts[0].append(p)
+
+    i = 0
+    while i < len(fronts) and fronts[i]:
+        next_front = []
+        for p in fronts[i]:
+            for q in dominated_by[p]:
+                domination_count[q] -= 1
+                if domination_count[q] == 0:
+                    next_front.append(q)
+        i += 1
+        if next_front:
+            fronts.append(next_front)
+    if fronts and not fronts[-1]:
+        fronts.pop()
+    return fronts
+
+
+def _crowding_distance(front_objectives: list) -> list:
+    """
+    Distance de crowding (Deb et al., 2002, Algorithme 2) au sein d'un front :
+    mesure l'espacement d'un individu par rapport à ses voisins sur chaque
+    objectif, pour favoriser la diversité le long du front lors de la
+    sélection. Les points extrêmes de chaque objectif reçoivent une distance
+    infinie (toujours préservés par l'opérateur de comparaison encombré).
+    """
+    m = len(front_objectives)
+    if m == 0:
+        return []
+    if m <= 2:
+        return [float("inf")] * m
+    n_obj = len(front_objectives[0])
+    distance = [0.0] * m
+    for k in range(n_obj):
+        order = sorted(range(m), key=lambda i: front_objectives[i][k])
+        vmin, vmax = front_objectives[order[0]][k], front_objectives[order[-1]][k]
+        distance[order[0]] = distance[order[-1]] = float("inf")
+        span = (vmax - vmin) if vmax > vmin else 1.0
+        for pos in range(1, m - 1):
+            prev_v = front_objectives[order[pos - 1]][k]
+            next_v = front_objectives[order[pos + 1]][k]
+            distance[order[pos]] += (next_v - prev_v) / span
+    return distance
+
+
 def _compute_r2_symbolic(model: torch.nn.Module, x_pool: torch.Tensor,
                          theta: float = 0.01, r2_threshold: float = 0.99,
                          max_edges: int = 40, domain: float = 2.0) -> float:
@@ -902,6 +1022,8 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         n_workers:       int   = 1,
         invalid_fitness: float = -10.0,
         maximize:        bool  = True,
+        enforce_latency_constraint: bool = True,
+        enable_latency_penalty:     bool = True,
     ) -> None:
         # espace factice : satisfait la validation du parent (non vide),
         # jamais consulté par les méthodes redéfinies ci-dessous.
@@ -918,6 +1040,19 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         self.n_epochs_eval   = n_epochs_eval
         self.seed            = seed
         self.invalid_fitness = invalid_fitness
+        # Contrainte de latence (100 ms, protocole du mémoire) appliquée via le
+        # principe de dominance contrainte (Deb et al., 2002) : un individu qui
+        # la viole est toujours dominé par un individu réalisable. Si False, la
+        # contrainte est ignorée (tous les individus traités comme réalisables) —
+        # décision explicite pour un usage hors contrainte USSD de production ;
+        # la latence reste toujours mesurée/journalisée dans tous les cas.
+        self.enforce_latency_constraint = enforce_latency_constraint
+        # Propagé explicitement à compute_fitness (cf. _evaluer_un) — remplace
+        # le monkeypatch de fonction module-level utilisé précédemment par
+        # run_search.py (_ehs.compute_fitness = ...), fragile et incohérent
+        # avec le vrai paramètre d'instance déjà utilisé pour
+        # enforce_latency_constraint et pour HierarchicalSensitivityAnalyzer.
+        self.enable_latency_penalty = enable_latency_penalty
 
         default_scratch = "/workspace/scratch"
         if scratch_dir is None:
@@ -948,6 +1083,13 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         self._last_checkpointed_generation: Optional[int] = None
         self._validation_full: dict = {}   # rempli par evaluate_best_on_full_validation()
 
+        # ── État NSGA-II (tri par dominance contrainte, Deb et al. 2002) ──────
+        self._rank: list  = []    # rang de front par individu de la génération courante
+        self._crowd: list = []    # distance de crowding par individu de la génération courante
+        self._pareto_archive: list = []   # front non-dominé cumulé {individual, fitness_components}
+        self._representative_changed_this_gen: bool = False
+        self._pareto_front_path = os.path.join(self.scratch_dir, "pareto_front.json")
+
     # ── Génération d'individus (redéfinition) ───────────────────────────────
 
     def _individu_aleatoire(self) -> dict:
@@ -970,6 +1112,89 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             self._population[i] = self._individu_aleatoire()
             self._scores[i] = None
             self._components[i] = None
+
+    # ── Sélection NSGA-II (redéfinition : dominance contrainte + crowding) ──
+    #
+    # RechercheHeuristique._elites() est HÉRITÉE telle quelle (non redéfinie
+    # ici) : elle appelle self._indices_tries(), dont l'override ci-dessous
+    # suffit par polymorphisme à la rendre NSGA-II-consciente sans dupliquer
+    # son code — idem pour son usage dans _injecter_diversite() (ci-dessus)
+    # et _eda_frequences() (plus bas).
+
+    def _compute_rank_and_crowding(self) -> None:
+        """
+        Calcule rang de front (tri non-dominé) et distance de crowding pour
+        CHAQUE individu de la population courante, à partir de
+        self._components (fitness_components par individu). Appelée une fois
+        par génération, juste après évaluation, avant toute sélection.
+        Individus invalides (components=None, échec d'évaluation) : forcés au
+        pire rang possible + crowding nul — jamais sélectionnés en élite/tournoi.
+        """
+        n = len(self._population)
+        objs, cvs, valid_idx = [], [], []
+        for i in range(n):
+            comp = self._components[i]
+            if comp is not None:
+                objs.append(_objective_vector(comp))
+                cvs.append(_constraint_violation(comp) if self.enforce_latency_constraint else 0.0)
+                valid_idx.append(i)
+
+        rank  = [len(valid_idx) + 1] * n   # pire rang par défaut (invalides)
+        crowd = [0.0] * n
+
+        if valid_idx:
+            fronts = _fast_non_dominated_sort(objs, cvs)
+            for front_rank, front in enumerate(fronts):
+                cd = _crowding_distance([objs[k] for k in front])
+                for local_k, k in enumerate(front):
+                    global_i = valid_idx[k]
+                    rank[global_i] = front_rank
+                    crowd[global_i] = cd[local_k]
+
+        self._rank, self._crowd = rank, crowd
+
+    def _indices_tries(self) -> list:
+        """
+        Redéfinition NSGA-II de RechercheHeuristique._indices_tries() :
+        opérateur de comparaison encombré (Deb et al., 2002, §III.A) — rang de
+        front croissant, puis distance de crowding décroissante à rang égal —
+        au lieu du tri par score scalaire du parent. _elites(), héritée,
+        utilise transparemment ce nouvel ordre.
+        """
+        return sorted(range(len(self._population)),
+                     key=lambda i: (self._rank[i], -self._crowd[i]))
+
+    def _tournoi(self, n: int) -> list:
+        """Sélection par tournoi NSGA-II : l'opérateur de comparaison encombré
+        (rang, puis crowding) départage le groupe, remplace la comparaison par
+        score scalaire du parent.
+
+        Utilise self._rng (pas le module `random` global, contrairement à
+        RechercheHeuristique._tournoi hérité) : reproductibilité complète sous
+        seed fixe — tout le reste du tirage aléatoire propre à
+        ExtendedHeuristicSearch (génération d'individus, croisement, mutation,
+        EDA) passe déjà par self._rng ; seule la sélection par tournoi héritée
+        du parent utilisait encore le générateur global avant cette redéfinition.
+        """
+        sel = []
+        indices = list(range(len(self._population)))
+        for _ in range(n):
+            groupe = self._rng.sample(indices, self.tournament_size)
+            gagnant = min(groupe, key=lambda i: (self._rank[i], -self._crowd[i]))
+            sel.append(dict(self._population[gagnant]))
+        return sel
+
+    def _selectionner_parents(self) -> list:
+        """
+        NSGA-II : élites + tournoi uniquement (Deb et al., 2002) — la sélection
+        par roulette du parent (proportionnelle à un score scalaire) n'a pas de
+        sens pour une sélection multi-objectifs par dominance et est retirée
+        (contrairement à RechercheHeuristique._selectionner_parents, qui
+        combinait élites + roulette + tournoi).
+        """
+        reste = self.taille_pop - self.elite_size
+        e_ind, _ = self._elites()
+        return e_ind + self._tournoi(reste)
 
     # ── Croisement (section 6) ───────────────────────────────────────────────
 
@@ -1193,6 +1418,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                 # nouvelle population) vers la génération suivante : on rejoue cette
                 # transition une fois pour obtenir une population start_gen cohérente.
                 diversite_restauree = self._calculer_diversite()
+                self._compute_rank_and_crowding()   # NSGA-II : requis avant _prepare_next_generation
                 self._prepare_next_generation(diversite_restauree)
 
         if not resumed:
@@ -1211,6 +1437,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
 
         for gen in gen_pbar:
             self._evaluer_generation(gen, df_train, df_val, device)
+            self._compute_rank_and_crowding()   # NSGA-II : requis avant toute sélection
 
             ameliore = self._mettre_a_jour_best_extended()
             diversite = self._calculer_diversite()
@@ -1246,7 +1473,35 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             self._prepare_next_generation(diversite)
 
         self._write_best_config_json()
+        self.export_pareto_front()
         return {"params": copy.deepcopy(self._best_individual), "score": self._best_score}
+
+    def export_pareto_front(self, path: Optional[str] = None) -> str:
+        """
+        Écrit l'archive Pareto cumulée (front non-dominé, dominance contrainte
+        latence) — le véritable résultat scientifique d'une recherche multi-
+        objectifs NSGA-II, par opposition au représentant unique de
+        heuristic_best_config.json (conservé pour compatibilité descendante
+        avec sensitivity_analysis.py/results_export.py, qui attendent UNE
+        configuration).
+        """
+        path = path or self._pareto_front_path
+        payload = {
+            "metadata": {
+                "etape": 2, "methode": "NSGA-II (Deb et al., 2002), dominance contrainte",
+                "latency_constraint_ms": LATENCY_CONSTRAINT_MS if self.enforce_latency_constraint else None,
+                "n_front": len(self._pareto_archive),
+                "objectives": ["MCC_clipped (max)", "PR_AUC (max)", "Brier (min)", "R2_symbolic (max)"],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            "front": [
+                {"individual": c["individual"], "fitness_components": c["fitness_components"]}
+                for c in self._pareto_archive
+            ],
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
+        return path
 
     def _prepare_next_generation(self, diversite: float) -> None:
         """
@@ -1279,6 +1534,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
     def _evaluer_generation(self, gen: int, df_train, df_val, device) -> None:
         from tqdm.auto import tqdm
 
+        self._representative_changed_this_gen = False
         to_eval = [(i, ind) for i, ind in enumerate(self._population) if self._scores[i] is None]
         pbar = tqdm(to_eval, desc=f"  |- gen {gen + 1}/{self.n_generations} individus",
                    unit="ind", leave=False, colour="green",
@@ -1300,7 +1556,8 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                 result = compute_fitness(individual, df_train, df_val, device,
                                          n_windows_eval=self.n_windows_eval,
                                          n_epochs_eval=self.n_epochs_eval, seed=self.seed,
-                                         window_cache=self._window_cache)
+                                         window_cache=self._window_cache,
+                                         enable_latency_penalty=self.enable_latency_penalty)
             except Exception as exc:   # noqa: BLE001 — robustesse absolue (section 14)
                 result = {"fitness_total": None, "fitness_components": None,
                           "model_state": None,
@@ -1320,9 +1577,12 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             self._log_evaluation(gen, individual_id, individual, result)
             if (result["fitness_components"] is not None and
                     (self._best_result is None or
-                     result["fitness_total"] > self._best_result["fitness_total"])):
+                     self._is_better_representative(result["fitness_components"],
+                                                     self._best_result["fitness_components"]))):
                 self._best_result = result
                 self._best_individual = copy.deepcopy(individual)
+                self._best_score = result["fitness_total"]
+                self._representative_changed_this_gen = True
                 self._save_best_candidate()
                 # heuristic_best_config.json à jour à CHAQUE amélioration (pas
                 # seulement en fin de fit()) : un crash/kill en cours de route
@@ -1330,6 +1590,30 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                 # results_export.py, sans devoir attendre la fin de la recherche.
                 self._write_best_config_json()
         return result
+
+    def _is_better_representative(self, cand_comp: dict, best_comp: dict) -> bool:
+        """
+        Règle de remplacement du représentant unique (best_candidate.pt /
+        heuristic_best_config.json) — dominance contrainte D'ABORD (Deb et al.,
+        2002), remplace la comparaison scalaire `>` de l'ancienne version.
+        Si cand domine best (ou best viole la contrainte et pas cand) : cand
+        remplace. Si best domine cand : jamais. Si mutuellement non-dominés
+        (aucun ne domine l'autre) : départage par fitness_total (AHP,
+        section~3.3.2) — SEUL point où le scalaire intervient encore, en
+        tie-break documenté et non en décision primaire.
+        """
+        obj_c = _objective_vector(cand_comp)
+        obj_b = _objective_vector(best_comp)
+        if self.enforce_latency_constraint:
+            cv_c = _constraint_violation(cand_comp)
+            cv_b = _constraint_violation(best_comp)
+        else:
+            cv_c = cv_b = 0.0
+        if _constrained_dominates(obj_c, cv_c, obj_b, cv_b):
+            return True
+        if _constrained_dominates(obj_b, cv_b, obj_c, cv_c):
+            return False
+        return cand_comp["fitness_total"] > best_comp["fitness_total"]
 
     def _log_evaluation(self, generation: int, individual_id: int, config: dict, result: dict) -> None:
         """Thread-safe (appelant détient déjà self._log_lock) : une ligne JSON par évaluation."""
@@ -1345,14 +1629,47 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             f.write(json.dumps(record, default=str) + "\n")
 
     def _mettre_a_jour_best_extended(self) -> bool:
-        meilleur_score = max(s for s in self._scores if s is not None)
-        ameliore = meilleur_score > self._best_score
-        if ameliore:
-            idx = self._scores.index(meilleur_score)
-            self._best_score = meilleur_score
-            # self._best_individual/_best_result déjà tenus à jour dans _evaluer_un
-            # (sous verrou) ; on synchronise seulement le score "officiel" ici.
-        return ameliore
+        """
+        Met à jour l'archive Pareto cumulée (section pareto_front.json) et
+        retourne si le REPRÉSENTANT unique (best_candidate.pt) a changé
+        pendant cette génération — la décision de remplacement elle-même a
+        déjà eu lieu dans _evaluer_un (sous verrou, dominance contrainte,
+        cf. _is_better_representative) ; ici on ne fait que lire le drapeau
+        posé à ce moment-là et rafraîchir l'archive complète.
+        """
+        self._update_pareto_archive()
+        return self._representative_changed_this_gen
+
+    def _update_pareto_archive(self) -> None:
+        """
+        Recalcule l'archive Pareto cumulée = front non-dominé de (archive
+        précédente ∪ individus valides de la génération courante), avec
+        dominance contrainte (latence, section~3.4 du mémoire). Ne conserve
+        que {individual, fitness_components} — jamais de state_dict (l'archive
+        peut grossir sur toute la recherche ; seul le représentant unique
+        conserve ses poids, cf. _is_better_representative/_save_best_candidate).
+        """
+        candidates = [
+            {"individual": dict(self._population[i]), "fitness_components": dict(comp)}
+            for i, comp in enumerate(self._components) if comp is not None
+        ]
+        pool = self._pareto_archive + candidates
+        if not pool:
+            return
+
+        objs = [_objective_vector(c["fitness_components"]) for c in pool]
+        cvs = [(_constraint_violation(c["fitness_components"]) if self.enforce_latency_constraint else 0.0)
+               for c in pool]
+        fronts = _fast_non_dominated_sort(objs, cvs)
+        non_dominated = [pool[i] for i in fronts[0]] if fronts else []
+
+        seen, archive = set(), []
+        for c in non_dominated:
+            key = self._individual_key(c["individual"])
+            if key not in seen:
+                seen.add(key)
+                archive.append(c)
+        self._pareto_archive = archive
 
     # ── Sauvegarde du meilleur modèle (section 8) ────────────────────────────
 
@@ -1502,6 +1819,16 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                 "n_windows_fitness": self.n_windows_eval,
                 "seed": self.seed,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                # Champs additionnels (n'altèrent pas le schéma canonique existant) :
+                # la sélection interne (élitisme/tournoi) se fait par dominance
+                # contrainte NSGA-II (Deb et al., 2002), pas par comparaison
+                # scalaire ; ce fichier ne décrit qu'UN représentant du front
+                # (le point le plus proche par dominance, départagé par fitness_total
+                # AHP en cas de non-dominance mutuelle) — le front complet est dans
+                # pareto_front.json.
+                "selection_method": "NSGA-II (constrained-domination, Deb et al. 2002)",
+                "pareto_front_file": os.path.basename(self._pareto_front_path),
+                "pareto_front_size": len(self._pareto_archive),
             },
             "theta_opt": {
                 "hidden_size": int(ind["hidden_size"]), "lr": float(ind["lr"]),
@@ -1540,6 +1867,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             "n_evaluations": self._n_evaluations,
             "rng_state": self._rng.getstate(),
             "best_candidate_path": self._best_candidate_path,
+            "pareto_archive": self._pareto_archive,
         }
         tmp_path = self._checkpoint_path + ".tmp"
         with open(tmp_path, "w", encoding="utf-8") as f:
@@ -1570,6 +1898,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         self._n_evaluations = state["n_evaluations"]
         self._rng.setstate(_json_rng_restore(state["rng_state"]))
         self._last_checkpointed_generation = state["generation"]
+        self._pareto_archive = state.get("pareto_archive", [])
 
         if os.path.exists(self._best_candidate_path):
             try:

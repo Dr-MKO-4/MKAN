@@ -3,6 +3,19 @@ run_search.py  Script exécutable (pas un notebook) qui lance la recherche
 heuristique étendue (ExtendedHeuristicSearch, Étape 2) sur les données réelles
 du projet, avec reprise automatique sur interruption.
 
+Sélection NSGA-II (Deb et al., 2002) : la sélection interne (élitisme,
+tournoi, injection de diversité, modèle EDA) se fait par TRI PAR DOMINANCE
+sur 4 objectifs (MCC_clipped, PR-AUC, Brier, R2_symbolic) + distance de
+crowding, PAS par comparaison d'une fitness scalaire agrégée. La latence
+(100 ms) est traitée comme une CONTRAINTE via le principe de dominance
+contrainte (--no-latency-constraint pour la désactiver), pas comme un 5e
+objectif libre. Le résultat scientifique complet est le front de Pareto
+(pareto_front.json) ; heuristic_best_config.json ne décrit qu'UN représentant
+de ce front (compatibilité descendante avec sensitivity_analysis.py/
+results_export.py, qui attendent une configuration unique) — la fitness_total
+AHP (§3.3.2 du mémoire) n'intervient plus que comme départage entre points
+mutuellement non-dominés, jamais comme critère de sélection primaire.
+
 Sources de données (branchées sur le workflow réel, cf. train.ipynb) :
     Train : MOMTSIM/config/featuresLog.parquet   (~5,5 M tx, pool d'entraînement)
     Val   : data/val_features.parquet            (150 K clients, seed 1001, ~1,65 M tx)
@@ -96,10 +109,22 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--enable-latency-penalty", dest="enable_latency_penalty",
                    action="store_true", default=False,
-                   help="Réactive la pénalité de latence dans la fitness (protocole "
-                        "intégral du mémoire, seuil 100 ms). Désactivée par défaut dans "
-                        "ce script (recherche sur GPU M4, hors contrainte USSD CPU de "
-                        "production) ; la latence reste toujours mesurée/journalisée.")
+                   help="Réactive la pénalité de latence dans la fitness_total AHP "
+                        "(protocole intégral du mémoire, seuil 100 ms) — utilisée UNIQUEMENT "
+                        "comme départage en cas de non-dominance mutuelle (cf. "
+                        "--no-latency-constraint pour la contrainte NSGA-II elle-même). "
+                        "Désactivée par défaut dans ce script (recherche sur GPU M4, hors "
+                        "contrainte USSD CPU de production) ; la latence reste toujours "
+                        "mesurée/journalisée.")
+    p.add_argument("--no-latency-constraint", dest="enforce_latency_constraint",
+                   action="store_false", default=True,
+                   help="Désactive la CONTRAINTE de latence dans la sélection NSGA-II "
+                        "(dominance contrainte, Deb et al. 2002) : tous les individus sont "
+                        "traités comme réalisables, la recherche explore librement les 4 "
+                        "objectifs (MCC/PR-AUC/Brier/R2_symbolic) sans jamais préférer un "
+                        "individu uniquement parce qu'il respecte les 100 ms. Activée par "
+                        "défaut (protocole intégral du mémoire) ; la latence reste toujours "
+                        "mesurée/journalisée dans tous les cas.")
     p.add_argument("--no-resume", dest="resume", action="store_false", default=True,
                    help="Ignore un éventuel checkpoint existant et repart de zéro.")
     p.add_argument("--skip-full-validation", dest="full_validation", action="store_false",
@@ -113,7 +138,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                    default=True,
                    help="Ne pas lancer l'analyse de sensibilité (Sobol+Morris) après la "
                         "recherche. Activée par défaut — coûteuse (jusqu'à N*(d+2) + "
-                        "r*(d+1) évaluations, d≈48 : potentiellement des dizaines de "
+                        "r*(d+1) évaluations, d ~= 48 : potentiellement des dizaines de "
                         "milliers d'entraînements avec les valeurs par défaut).")
     p.add_argument("--sensitivity_N", type=int, default=1024,
                    help="Protocole Étape 2 : taille d'échantillon Sobol (défaut 1024).")
@@ -244,29 +269,22 @@ def main(argv=None) -> int:
         patience=args.patience, n_windows_eval=args.n_windows_eval,
         n_epochs_eval=args.n_epochs_eval, seed=args.seed,
         scratch_dir=args.scratch_dir,
+        enforce_latency_constraint=args.enforce_latency_constraint,
+        enable_latency_penalty=args.enable_latency_penalty,
     )
     print(f"Sorties écrites dans : {search.scratch_dir}")
-    print(f"Pénalité de latence dans la fitness : "
+    print(f"Sélection NSGA-II : contrainte de latence "
+         f"{'ACTIVÉE (100 ms)' if args.enforce_latency_constraint else 'DÉSACTIVÉE (4 objectifs libres)'}")
+    print(f"Pénalité de latence dans la fitness_total (départage AHP) : "
          f"{'ACTIVÉE (protocole intégral)' if args.enable_latency_penalty else 'DÉSACTIVÉE (mesurée/journalisée quand même)'}")
 
-    # enable_latency_penalty est un paramètre de compute_fitness (pas de ExtendedHeuristicSearch) ;
-    # on le propage via une fermeture légère pour ne pas modifier la signature de fit()/_evaluer_un.
-    import extended_heuristic_search as _ehs
-    _original_compute_fitness = _ehs.compute_fitness
-
-    def _compute_fitness_with_flag(config, df_tr, df_vl, dev, **kwargs):
-        kwargs.setdefault("enable_latency_penalty", args.enable_latency_penalty)
-        return _original_compute_fitness(config, df_tr, df_vl, dev, **kwargs)
-
-    _ehs.compute_fitness = _compute_fitness_with_flag
-    try:
-        best = search.fit(df_train, df_val, device=device, resume_from_checkpoint=args.resume)
-    finally:
-        _ehs.compute_fitness = _original_compute_fitness
+    best = search.fit(df_train, df_val, device=device, resume_from_checkpoint=args.resume)
 
     print("\n" + "=" * 70)
-    print(f"Meilleure configuration : {best['params']}")
-    print(f"Score de fitness        : {best['score']:.4f}")
+    print(f"Représentant du front de Pareto : {best['params']}")
+    print(f"Fitness_total (AHP, départage)   : {best['score']:.4f}")
+    print(f"Taille du front de Pareto        : {len(search._pareto_archive)} "
+         f"(pareto_front.json)")
     print("=" * 70)
 
     if args.full_validation:
