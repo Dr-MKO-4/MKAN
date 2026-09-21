@@ -1,0 +1,208 @@
+[
+  {
+    "rank": 1,
+    "MCC_raw": 0.9834131726178621,
+    "MCC_clipped": 0.9834131726178621,
+    "PR_AUC": 0.9993591039197686,
+    "Brier": 0.004768696238500933,
+    "R2_symbolic": 0.525,
+    "latency_ms": 853.5887077450752,
+    "fitness_total": 0.6949897405913118,
+    "Base_Forget": "relukan",
+    "Base_Input": "efficientkan",
+    "Base_Candidate": "wavkan",
+    "Base_Output": null,
+    "Cell_Type": "GRUKANCell",
+    "Input_Regime": "raw",
+    "hidden_size": 128,
+    "lr": 0.0001,
+    "lam": 0.0001,
+    "mu1": 0.1,
+    "mu2": 0.6989017708691363,
+    "W": 5,
+    "batch_size": 32,
+    "gates": {
+      "Forget": {
+        "Base": "relukan",
+        "Grid_G": 8
+      },
+      "Input": {
+        "Base": "efficientkan",
+        "Grid_G": 3,
+        "Spline_Degree_k": 4
+      },
+      "Candidate": {
+        "Base": "wavkan",
+        "Mother_Wavelet": "dog",
+        "M_wavelets": 3
+      }
+    }
+  },
+  {
+    "rank": 2,
+    "MCC_raw": 0.9739688363043011,
+    "MCC_clipped": 0.9739688363043011,
+    "PR_AUC": 0.9984177699208896,
+    "Brier": 0.009145536735845979,
+    "R2_symbolic": 0.5,
+    "latency_ms": 92.79054030776024,
+    "fitness_total": 0.687820146491566,
+    "Base_Forget": "relukan",
+    "Base_Input": "chebyshev",
+    "Base_Candidate": "wavkan",
+    "Base_Output": "linear",
+    "Cell_Type": "TKANCell",
+    "Input_Regime": "raw",
+    "hidden_size": 32,
+    "lr": 0.0001,
+    "lam": 0.0001,
+    "mu1": 0.1,
+    "mu2": 1.6515820625005828,
+    "W": 10,
+    "batch_size": 32,
+    "gates": {
+      "Forget": {
+        "Base": "relukan",
+        "Grid_G": 12
+      },
+      "Input": {
+        "Base": "chebyshev",
+        "Degree_n": 5
+      },
+      "Candidate": {
+        "Base": "wavkan",
+        "Mother_Wavelet": "dog",
+        "M_wavelets": 3
+      },
+      "Output": {
+        "Base": "linear"
+      }
+    }
+  },
+  {
+    "rank": 3,
+    "MCC_raw": 0.9558933194803277,
+    "MCC_clipped": 0.9558933194803277,
+    "PR_AUC": 0.9963401771729328,
+    "Brier": 0.016040662062915694,
+    "R2_symbolic": 0.475,
+    "latency_ms": 10.74404176324606,
+    "fitness_total": 0.676536272775927,
+    "Base_Forget": "chebyshev",
+    "Base_Input": "hybrid",
+    "Base_Candidate": "fourier",
+    "Base_Output": null,
+    "Cell_Type": "GRUKANCell",
+    "Input_Regime": "engineered",
+    "hidden_size": 16,
+    "lr": 0.00021287922643692847,
+    "lam": 0.0001,
+    "mu1": 0.9013826286353716,
+    "mu2": 1.4405027660310896,
+    "W": 10,
+    "batch_size": 32,
+    "gates": {
+      "Forget": {
+        "Base": "chebyshev",
+        "Degree_n": 8
+      },
+      "Input": {
+        "Base": "hybrid",
+        "M": 4,
+        "K": 2
+      },
+      "Candidate": {
+        "Base": "fourier",
+        "K": 1
+      }
+    }
+  },
+  {
+    "rank": 4,
+    "MCC_raw": 0.97540350649844,
+    "MCC_clipped": 0.97540350649844,
+    "PR_AUC": 0.9991079215475986,
+    "Brier": 0.005919582685812681,
+    "R2_symbolic": 0.325,
+    "latency_ms": 27.623415924608707,
+    "fitness_total": 0.6715504455834038,
+    "Base_Forget": "efficientkan",
+    "Base_Input": "fasterkan",
+    "Base_Candidate": "wavkan",
+    "Base_Output": "efficientkan",
+    "Cell_Type": "TKANCell",
+    "Input_Regime": "raw",
+    "hidden_size": 32,
+    "lr": 0.00013533854304888625,
+    "lam": 0.00025615611928297337,
+    "mu1": 0.1199322047380537,
+    "mu2": 0.3976156945177569,
+    "W": 5,
+    "batch_size": 32,
+    "gates": {
+      "Forget": {
+        "Base": "efficientkan",
+        "Grid_G": 16,
+        "Spline_Degree_k": 3
+      },
+      "Input": {
+        "Base": "fasterkan",
+        "N_centers": 12,
+        "h_bandwidth": 0.531453437110777
+      },
+      "Candidate": {
+        "Base": "wavkan",
+        "Mother_Wavelet": "mexican_hat",
+        "M_wavelets": 3
+      },
+      "Output": {
+        "Base": "efficientkan",
+        "Grid_G": 16,
+        "Spline_Degree_k": 2
+      }
+    }
+  },
+  {
+    "rank": 5,
+    "MCC_raw": 0.9582093450126996,
+    "MCC_clipped": 0.9582093450126996,
+    "PR_AUC": 0.9937398167364697,
+    "Brier": 0.022158450170677278,
+    "R2_symbolic": 0.425,
+    "latency_ms": 66.60454161465168,
+    "fitness_total": 0.6708949246635957,
+    "Base_Forget": "efficientkan",
+    "Base_Input": "efficientkan",
+    "Base_Candidate": "wavkan",
+    "Base_Output": "linear",
+    "Cell_Type": "TKANCell",
+    "Input_Regime": "raw",
+    "hidden_size": 32,
+    "lr": 0.0001,
+    "lam": 0.0001,
+    "mu1": 1.6231090930242145,
+    "mu2": 1.6515820625005828,
+    "W": 10,
+    "batch_size": 128,
+    "gates": {
+      "Forget": {
+        "Base": "efficientkan",
+        "Grid_G": 5,
+        "Spline_Degree_k": 3
+      },
+      "Input": {
+        "Base": "efficientkan",
+        "Grid_G": 16,
+        "Spline_Degree_k": 2
+      },
+      "Candidate": {
+        "Base": "wavkan",
+        "Mother_Wavelet": "mexican_hat",
+        "M_wavelets": 5
+      },
+      "Output": {
+        "Base": "linear"
+      }
+    }
+  }
+]

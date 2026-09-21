@@ -48,7 +48,7 @@ import os
 import sys
 import time
 import traceback
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -498,12 +498,17 @@ class HierarchicalSensitivityAnalyzer:
     # ── Batch d'évaluations avec parallélisation + checkpointing ────────────
 
     def _evaluate_batch(self, X: np.ndarray, start_index: int = 0,
-                        checkpoint_every: int = 50) -> np.ndarray:
+                        checkpoint_every: int = 50, desc: str = "évaluations") -> np.ndarray:
         """
         Évalue chaque ligne de X (tirages [0,1]^d), avec reprise automatique
         depuis sobol_evaluations.npy (section 16) et checkpoint tous les
-        `checkpoint_every` évaluations.
+        `checkpoint_every` évaluations. Barre de progression tqdm dans les deux
+        cas (séquentiel ET ProcessPoolExecutor) — un Sobol à N=1024/d~48 lance
+        potentiellement des dizaines de milliers d'entraînements ; sans retour
+        visuel, rien ne distingue un run normal (juste long) d'un run bloqué.
         """
+        from tqdm.auto import tqdm
+
         n = X.shape[0]
         done = self._load_checkpoint()
         Y = np.full(n, np.nan, dtype=float)
@@ -512,16 +517,26 @@ class HierarchicalSensitivityAnalyzer:
                 Y[idx - start_index] = fitness
 
         pending = [(start_index + i, X[i]) for i in range(n) if np.isnan(Y[i])]
+        n_already_done = n - len(pending)
         if not pending:
             return Y
 
         results: dict = {}
+        pbar = tqdm(total=len(pending), desc=f"  {desc}", unit="éval", initial=0,
+                   bar_format="{l_bar}{bar:28}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}{postfix}]")
+        if n_already_done:
+            pbar.write(f"  ({n_already_done} évaluation(s) déjà disponibles depuis un run précédent — reprises)")
+
         if self.max_workers > 1:
             with ProcessPoolExecutor(max_workers=self.max_workers,
                                      initializer=_init_worker,
                                      initargs=(self,)) as pool:
-                for eval_id, fitness in pool.map(_worker_evaluate, pending):
+                futures = {pool.submit(_worker_evaluate, item): item[0] for item in pending}
+                for fut in as_completed(futures):
+                    eval_id, fitness = fut.result()
                     results[eval_id] = fitness
+                    pbar.update(1)
+                    pbar.set_postfix({"dernier": f"{fitness:.4f}"})
                     if len(results) % checkpoint_every == 0:
                         self._append_checkpoint(results)
                         results = {}
@@ -529,9 +544,12 @@ class HierarchicalSensitivityAnalyzer:
             for eval_id, x_row in pending:
                 fitness = self._evaluate_individual(self.decode_config(x_row), eval_id)
                 results[eval_id] = fitness
+                pbar.update(1)
+                pbar.set_postfix({"dernier": f"{fitness:.4f}"})
                 if len(results) % checkpoint_every == 0:
                     self._append_checkpoint(results)
                     results = {}
+        pbar.close()
         if results:
             self._append_checkpoint(results)
 
@@ -590,7 +608,7 @@ class HierarchicalSensitivityAnalyzer:
 
         problem = self._problem()
         X = morris_sample.sample(problem, N=r, num_levels=num_levels, seed=seed)
-        Y = self._evaluate_batch(X, start_index=0)
+        Y = self._evaluate_batch(X, start_index=0, desc="Morris")
 
         Si = morris_analyze.analyze(problem, X, Y, num_levels=num_levels, seed=seed)
 
@@ -678,7 +696,7 @@ class HierarchicalSensitivityAnalyzer:
         for name, val in fixed.items():
             X_full[:, idx_full[name]] = val
 
-        Y = self._evaluate_batch(X_full, start_index=0)
+        Y = self._evaluate_batch(X_full, start_index=0, desc="Sobol")
         masks = np.array([self.mask_active(X_full[i]) for i in range(X_full.shape[0])])
 
         Si = sobol_analyze.analyze(problem, Y, calc_second_order=calc_second_order, seed=seed)
@@ -730,9 +748,11 @@ class HierarchicalSensitivityAnalyzer:
         from SALib.sample import morris as morris_sample
         from SALib.analyze import morris as morris_analyze
 
+        from tqdm.auto import tqdm
+
         base_center = self.best_config or self._default_individual()
         intragroup = {}
-        for base in GATE_CANDIDATES[gate]:
+        for base in tqdm(GATE_CANDIDATES[gate], desc=f"Intra-groupe {gate}", unit="base"):
             spec = BASE_PARAM_SPACE[base]
             if not spec["params"]:
                 intragroup[base] = {"status": "aucun hyperparamètre structurel (base sans P(base))"}
@@ -744,7 +764,8 @@ class HierarchicalSensitivityAnalyzer:
             X_local = morris_sample.sample(problem, N=r, num_levels=num_levels, seed=seed)
 
             Y = np.empty(X_local.shape[0], dtype=float)
-            for row_i in range(X_local.shape[0]):
+            for row_i in tqdm(range(X_local.shape[0]), desc=f"  {gate}::{base}",
+                              unit="éval", leave=False):
                 individual = self._individual_fixed_except_gate(base_center, gate, base,
                                                                  local_names, X_local[row_i])
                 Y[row_i] = self._evaluate_individual(individual, evaluation_id=1_000_000 + row_i)

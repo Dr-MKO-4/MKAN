@@ -1,0 +1,63 @@
+{
+  "metadata": {
+    "etape": 2,
+    "n_generations": 10,
+    "n_evaluations": 102,
+    "n_windows_fitness": 50000,
+    "seed": 42,
+    "timestamp": "2026-09-18T10:11:50.670836+00:00"
+  },
+  "theta_opt": {
+    "hidden_size": 128,
+    "lr": 0.0001,
+    "lam": 0.0001,
+    "mu1": 0.1,
+    "mu2": 0.6989017708691363,
+    "batch_size": 32,
+    "W": 5
+  },
+  "theta_struct": {
+    "cell_type": "GRUKANCell",
+    "hidden_size_gru_adjusted": 170,
+    "input_regime": "raw",
+    "gates": {
+      "Forget": {
+        "base": "relukan",
+        "hyperparams": {
+          "Grid_G": 8
+        }
+      },
+      "Input": {
+        "base": "efficientkan",
+        "hyperparams": {
+          "Grid_G": 3,
+          "Spline_Degree_k": 4
+        }
+      },
+      "Candidate": {
+        "base": "wavkan",
+        "hyperparams": {
+          "Mother_Wavelet": "dog",
+          "M_wavelets": 3
+        }
+      }
+    }
+  },
+  "fitness_components": {
+    "MCC_raw": 0.9834131726178621,
+    "MCC_clipped": 0.9834131726178621,
+    "PR_AUC": 0.9993591039197686,
+    "Brier": 0.004768696238500933,
+    "R2_symbolic": 0.525,
+    "latency_ms": 853.5887077450752,
+    "penalty_lat": 567.8959404408924,
+    "fitness_total": 0.6949897405913118
+  },
+  "validation_full": {
+    "MCC": 0.9830242597402855,
+    "PR_AUC": 0.99934301113331,
+    "Brier": 0.004901093786661387,
+    "AUC_ROC": 0.9997739014170653,
+    "n_windows": 993245
+  }
+}

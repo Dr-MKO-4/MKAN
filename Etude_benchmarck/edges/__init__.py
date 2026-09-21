@@ -16,12 +16,12 @@ Usage :
 from .bases import (
     BASIS_REGISTRY,
     HybridBasis, GaussianBasis, RSWAFBasis, BSplineBasis, ChebyshevBasis,
-    WaveletBasis, ReLUKANBasis, FourierBasis, JacobiBasis, LinearBasis,
+    WaveletBasis, ReLUKANBasis, FourierBasis, JacobiBasis, SincBasis, LinearBasis,
 )
 from .layer import GenericKANLayer
 
 __all__ = [
     "BASIS_REGISTRY", "GenericKANLayer",
     "HybridBasis", "GaussianBasis", "RSWAFBasis", "BSplineBasis", "ChebyshevBasis",
-    "WaveletBasis", "ReLUKANBasis", "FourierBasis", "JacobiBasis", "LinearBasis",
+    "WaveletBasis", "ReLUKANBasis", "FourierBasis", "JacobiBasis", "SincBasis", "LinearBasis",
 ]

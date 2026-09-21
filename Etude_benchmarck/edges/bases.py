@@ -25,6 +25,9 @@ Sources (voir amélioration_MKAN.md pour les fiches techniques complètes) :
     ReLUKANBasis   ReLU-KAN      (Qiu et al., 2024)
     FourierBasis   Fourier pur   (composante KAN-AD isolée)
     JacobiBasis    fKAN          (Aghaei, 2024  Jacobi fractionnaire simplifié)
+    SincBasis      SincKAN       (interpolation de Sinc, Sugihara & Matsuo, 2004
+                                  absente du registre historique, ajoutée pour le
+                                  benchmark synthétique Niveau 0 de l'Étape 3)
     LinearBasis    baseline non-KAN (w·x, 1 paramètre/arête)
 """
 
@@ -363,6 +366,60 @@ class FourierBasis(nn.Module):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SincKAN  interpolation de Sinc multi-résolution (Sugihara & Matsuo, 2004)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SincBasis(nn.Module):
+    """
+    SincKAN : interpolation de Sinc/Whittaker-Shannon, sinc(t) = sin(pi t)/(pi t)
+    (sinc normalisé, sinc(0)=1 par convention torch.sinc). Convergence
+    exponentielle garantie par le théorème de Sugihara & Matsuo (2004) pour
+    f analytique à décroissance exponentielle sur une bande de Hardy H^1(D_d)
+    (cf. step_1 §1.5, step_3 Proposition prop:sinc_convergence).
+
+    Calibration budget iso B=12 (step_3, tableau~\\ref{tab:budget_iso}) :
+    N=6 points d'interpolation également espacés, dupliqués sur DEUX largeurs
+    de bande h1 (grossière, résolution basse fréquence) et h2 = h1/2 (fine,
+    résolution haute fréquence) en parallèle, chacune pondérée par un jeu de
+    coefficients indépendant :
+
+        phi(x) = sum_{j in {1,2}} sum_{i=1}^{N} c_{i,j} sinc((x - x_i) / h_j)
+
+    soit 2N = 12 coefficients apprenables/arête pour N=6. Absent du registre
+    historique BASIS_REGISTRY (cf. extended_heuristic_search.py, probleme.md) ;
+    implémenté ici spécifiquement pour le benchmark synthétique Niveau 0
+    (Étape 3), qui exige les 9 bases théoriquement discutées en Étape 1/2.
+    """
+
+    budget_kwargs = dict(N=6)
+    native_kwargs = dict(N=6)
+
+    def __init__(self, in_features: int, out_features: int,
+                 N: int = 6, domain: float = 1.0, h_coarse: float = None, h_fine: float = None):
+        super().__init__()
+        self.N = N
+        centers = torch.linspace(-domain, domain, N)
+        self.register_buffer("centers", centers)
+        base_h = 2 * domain / (N - 1)
+        h1 = h_coarse if h_coarse is not None else base_h
+        h2 = h_fine   if h_fine   is not None else base_h * 0.5
+        self.register_buffer("inv_h", torch.tensor([1.0 / float(h1), 1.0 / float(h2)]))
+        self.weight = nn.Parameter(torch.randn(in_features, out_features, 2, N) * 0.1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_col = x.unsqueeze(-1).unsqueeze(-1)                          # (batch, in, 1, 1)
+        diff  = x_col - self.centers.view(1, 1, 1, -1)                 # (batch, in, 1, N)
+        t     = diff * self.inv_h.view(1, 1, 2, 1)                     # (batch, in, 2, N)
+        basis = torch.sinc(t)
+        basis = basis.reshape(x.shape[0], x.shape[1], 2 * self.N)      # (batch, in, 2N)
+        weight = self.weight.reshape(self.weight.shape[0], self.weight.shape[1], 2 * self.N)
+        return _bmm_edges(basis, weight)
+
+    def l1_norm(self) -> torch.Tensor:
+        return self.weight.abs().sum()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # fKAN  Jacobi fractionnaire simplifié (Aghaei, 2024)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -448,5 +505,6 @@ BASIS_REGISTRY = {
     "relukan":   ReLUKANBasis,
     "fourier":   FourierBasis,
     "fkan":      JacobiBasis,
+    "sinckan":   SincBasis,
     "linear":    LinearBasis,
 }

@@ -1,0 +1,168 @@
+[
+  {
+    "individual": {
+      "Cell_Type": "GRUKANCell",
+      "Input_Regime": "raw",
+      "hidden_size": 128,
+      "lr": 0.0001,
+      "lam": 0.0001,
+      "mu1": 0.1,
+      "mu2": 0.6989017708691363,
+      "batch_size": 32,
+      "W": 5,
+      "gates": {
+        "Forget": {
+          "Base": "relukan",
+          "Grid_G": 8
+        },
+        "Input": {
+          "Base": "efficientkan",
+          "Grid_G": 3,
+          "Spline_Degree_k": 4
+        },
+        "Candidate": {
+          "Base": "wavkan",
+          "Mother_Wavelet": "dog",
+          "M_wavelets": 3
+        }
+      }
+    },
+    "score": 0.6949897405913118,
+    "generation": 5
+  },
+  {
+    "individual": {
+      "Cell_Type": "TKANCell",
+      "Input_Regime": "raw",
+      "hidden_size": 32,
+      "lr": 0.0001,
+      "lam": 0.0001,
+      "mu1": 0.1,
+      "mu2": 1.6515820625005828,
+      "batch_size": 32,
+      "W": 10,
+      "gates": {
+        "Forget": {
+          "Base": "relukan",
+          "Grid_G": 12
+        },
+        "Input": {
+          "Base": "chebyshev",
+          "Degree_n": 5
+        },
+        "Candidate": {
+          "Base": "wavkan",
+          "Mother_Wavelet": "dog",
+          "M_wavelets": 3
+        },
+        "Output": {
+          "Base": "linear"
+        }
+      }
+    },
+    "score": 0.687820146491566,
+    "generation": 9
+  },
+  {
+    "individual": {
+      "Cell_Type": "GRUKANCell",
+      "Input_Regime": "engineered",
+      "hidden_size": 16,
+      "lr": 0.00021287922643692847,
+      "lam": 0.0001,
+      "mu1": 0.9013826286353716,
+      "mu2": 1.4405027660310896,
+      "batch_size": 32,
+      "W": 10,
+      "gates": {
+        "Forget": {
+          "Base": "chebyshev",
+          "Degree_n": 8
+        },
+        "Input": {
+          "Base": "hybrid",
+          "M": 4,
+          "K": 2
+        },
+        "Candidate": {
+          "Base": "fourier",
+          "K": 1
+        }
+      }
+    },
+    "score": 0.676536272775927,
+    "generation": 9
+  },
+  {
+    "individual": {
+      "Cell_Type": "TKANCell",
+      "Input_Regime": "raw",
+      "hidden_size": 32,
+      "lr": 0.00013533854304888625,
+      "lam": 0.00025615611928297337,
+      "mu1": 0.1199322047380537,
+      "mu2": 0.3976156945177569,
+      "batch_size": 32,
+      "W": 5,
+      "gates": {
+        "Forget": {
+          "Base": "efficientkan",
+          "Grid_G": 16,
+          "Spline_Degree_k": 3
+        },
+        "Input": {
+          "Base": "fasterkan",
+          "N_centers": 12,
+          "h_bandwidth": 0.531453437110777
+        },
+        "Candidate": {
+          "Base": "wavkan",
+          "Mother_Wavelet": "mexican_hat",
+          "M_wavelets": 3
+        },
+        "Output": {
+          "Base": "efficientkan",
+          "Grid_G": 16,
+          "Spline_Degree_k": 2
+        }
+      }
+    },
+    "score": 0.6715504455834038,
+    "generation": 8
+  },
+  {
+    "individual": {
+      "Cell_Type": "TKANCell",
+      "Input_Regime": "raw",
+      "hidden_size": 32,
+      "lr": 0.0001,
+      "lam": 0.0001,
+      "mu1": 1.6231090930242145,
+      "mu2": 1.6515820625005828,
+      "batch_size": 128,
+      "W": 10,
+      "gates": {
+        "Forget": {
+          "Base": "efficientkan",
+          "Grid_G": 5,
+          "Spline_Degree_k": 3
+        },
+        "Input": {
+          "Base": "efficientkan",
+          "Grid_G": 16,
+          "Spline_Degree_k": 2
+        },
+        "Candidate": {
+          "Base": "wavkan",
+          "Mother_Wavelet": "mexican_hat",
+          "M_wavelets": 5
+        },
+        "Output": {
+          "Base": "linear"
+        }
+      }
+    },
+    "score": 0.6708949246635957,
+    "generation": 8
+  }
+]

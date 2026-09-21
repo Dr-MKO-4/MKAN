@@ -498,6 +498,36 @@ def _measure_latency_ms(model: torch.nn.Module, W: int, input_size: int,
     return best * 1000.0
 
 
+def _sanitize_scores(scores: np.ndarray, context: str, max_bad_fraction: float = 0.01) -> np.ndarray:
+    """
+    Détecte puis répare les scores NaN/Inf produits par le modèle en
+    validation. AVANT ce correctif, np.nan_to_num remplaçait silencieusement
+    ces valeurs par 0.5/1.0/0.0 sans qu'aucun signal n'indique qu'une
+    configuration produit des prédictions invalides — MCC/PR-AUC/Brier étaient
+    alors calculés sur des scores partiellement fabriqués, avec un individu
+    potentiellement défaillant recevant une fitness d'apparence normale.
+
+    Cohérent avec le traitement d'une loss NaN pendant l'entraînement (échec
+    immédiat, pas de réparation silencieuse) : au-delà de `max_bad_fraction`
+    (1 % par défaut — tolère une poignée de cas limites numériques sans tuer
+    des configurations par ailleurs valides), la configuration est déclarée
+    instable et l'évaluation échoue explicitement plutôt que de continuer sur
+    des données partiellement inventées.
+    """
+    bad_mask = np.isnan(scores) | np.isinf(scores)
+    n_bad = int(bad_mask.sum())
+    if n_bad > 0:
+        fraction = n_bad / len(scores)
+        from tqdm.auto import tqdm
+        tqdm.write(f"  [AVERTISSEMENT] {context} : {n_bad}/{len(scores)} scores NaN/Inf "
+                  f"({fraction:.2%}) — configuration potentiellement instable.")
+        if fraction > max_bad_fraction:
+            raise RuntimeError(f"{context} : {n_bad}/{len(scores)} scores NaN/Inf "
+                              f"({fraction:.2%}) dépasse le seuil de tolérance "
+                              f"({max_bad_fraction:.2%}) — configuration instable rejetée.")
+    return np.nan_to_num(scores, nan=0.5, posinf=1.0, neginf=0.0).clip(0.0, 1.0)
+
+
 def _release_device_memory(device) -> None:
     """
     Force la libération de la mémoire GPU après une évaluation fitness (voir
@@ -507,14 +537,25 @@ def _release_device_memory(device) -> None:
     pour réutilisation interne, ce qui suffit à provoquer un OOM progressif
     sur MPS après quelques générations, la VRAM unifiée d'Apple Silicon étant
     partagée avec le reste du système).
+
+    Ne lève JAMAIS : appelée depuis un bloc `finally` (compute_fitness,
+    evaluate_best_on_full_validation) — si cette purge échouait elle-même
+    (ex. empty_cache() instable sur un pilote MPS particulier), une exception
+    non interceptée ICI remplacerait silencieusement le `return result` déjà
+    construit par le try/except appelant, perdant un résultat de fitness
+    parfaitement valide pour une raison de nettoyage mémoire sans rapport.
     """
-    import gc
-    gc.collect()
-    device_type = device.type if isinstance(device, torch.device) else str(device)
-    if device_type == "mps" and torch.backends.mps.is_available():
-        torch.mps.empty_cache()
-    elif device_type == "cuda" and torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    try:
+        import gc
+        gc.collect()
+        device_type = device.type if isinstance(device, torch.device) else str(device)
+        if device_type == "mps" and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        elif device_type == "cuda" and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception as exc:   # noqa: BLE001 — voir docstring : ne doit jamais remonter
+        from tqdm.auto import tqdm
+        tqdm.write(f"  [avertissement] libération mémoire device échouée (ignorée) : {exc}")
 
 
 def _penalty_latency(latency_ms: float, alpha_lat: float = 10.0) -> float:
@@ -899,7 +940,7 @@ def compute_fitness(
             for s in range(0, X_vl_t.shape[0], batch_size):
                 scores_parts.append(model(X_vl_t[s:s + batch_size]))
             scores = torch.cat(scores_parts).cpu().numpy()
-        scores = np.nan_to_num(scores, nan=0.5, posinf=1.0, neginf=0.0).clip(0.0, 1.0)
+        scores = _sanitize_scores(scores, "compute_fitness (validation)")
 
         if len(np.unique(y_vl)) < 2:
             mcc_raw, pr_auc, brier = 0.0, 0.0, 1.0
@@ -1425,6 +1466,15 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             self._initialiser()
             self._population = [self._individu_aleatoire() for _ in range(self.taille_pop)]
             self._components = [None] * self.taille_pop
+            # _window_cache est clé par (regime, W), PAS par identité de df_train/
+            # df_val : appeler fit() une seconde fois sur la MÊME instance avec des
+            # données différentes (notebook, sweep programmatique) réutiliserait
+            # silencieusement les fenêtres de l'appel précédent sans la moindre
+            # erreur ni avertissement — résultats faux, aucun signal. Un nouveau
+            # run() (resume=False) reconstruit forcément ses fenêtres à neuf ; un
+            # resume garde le cache car il poursuit la MÊME recherche sur les
+            # MÊMES données par construction.
+            self._window_cache = {}
 
         start_gen = (self._last_checkpointed_generation + 1) if resumed else 0
         sans_amelioration = 0
@@ -1463,7 +1513,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                           f"mu={self._mutation_rate_courant:.3f} | "
                           f"{'AMELIORATION' if ameliore else '='}")
 
-            self._save_checkpoint(gen)
+            self._safe_disk_write("_save_checkpoint", self._save_checkpoint, gen)
 
             sans_amelioration = 0 if ameliore else sans_amelioration + 1
             if sans_amelioration >= self.patience:
@@ -1472,8 +1522,8 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
 
             self._prepare_next_generation(diversite)
 
-        self._write_best_config_json()
-        self.export_pareto_front()
+        self._safe_disk_write("_write_best_config_json", self._write_best_config_json)
+        self._safe_disk_write("export_pareto_front", self.export_pareto_front)
         return {"params": copy.deepcopy(self._best_individual), "score": self._best_score}
 
     def export_pareto_front(self, path: Optional[str] = None) -> str:
@@ -1539,12 +1589,29 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         pbar = tqdm(to_eval, desc=f"  |- gen {gen + 1}/{self.n_generations} individus",
                    unit="ind", leave=False, colour="green",
                    bar_format="{l_bar}{bar:28}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}{postfix}]")
+        n_echecs = 0
         for i, ind in pbar:
             result = self._evaluer_un(gen, i, ind, df_train, df_val, device)
             self._scores[i] = result["fitness_total"] if result["fitness_total"] is not None \
                 else self.invalid_fitness
             self._components[i] = result.get("fitness_components")
+            if result.get("fitness_components") is None:
+                n_echecs += 1
             pbar.set_postfix({"fitness": f"{self._scores[i]:.4f}", "base": ind.get("Cell_Type")})
+
+        # Chaque échec individuel produit déjà une ligne [ERREUR], mais rien ne
+        # signale explicitement un ÉCHEC SYSTÉMIQUE (tous les individus tombent
+        # sur la même cause racine — mauvais fichier de données, schéma de
+        # colonnes incorrect, device cassé...) : sans ce contrôle, la recherche
+        # continue silencieusement génération après génération sans jamais
+        # améliorer le front (patience finit par arrêter, mais sans indiquer
+        # POURQUOI) plutôt que de signaler clairement le problème dès qu'il
+        # survient.
+        if to_eval and n_echecs == len(to_eval):
+            tqdm.write(f"  [AVERTISSEMENT] gén={gen} : {n_echecs}/{len(to_eval)} individus ont "
+                      f"ÉCHOUÉ (0 individu valide cette génération) — vérifier les fichiers de "
+                      f"données/schéma/device : voir les lignes [ERREUR] ci-dessus pour la "
+                      f"cause exacte (souvent la même pour tous).")
 
     def _evaluer_un(self, gen: int, individual_id: int, individual: dict,
                     df_train, df_val, device) -> dict:
@@ -1574,7 +1641,15 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
 
         with self._log_lock:
             self._n_evaluations += 1
-            self._log_evaluation(gen, individual_id, individual, result)
+            # Écritures disque protégées individuellement : un incident I/O (disque
+            # plein, permission, verrou externe sur le fichier...) ne doit JAMAIS
+            # interrompre toute la recherche en cours ni empêcher la mise à jour de
+            # l'état EN MÉMOIRE (self._best_individual/_best_result restent la
+            # source de vérité pour get_best_model()/export_top5() même si le
+            # disque a momentanément refusé l'écriture) — seul un avertissement est
+            # émis, la recherche continue.
+            self._safe_disk_write("_log_evaluation", self._log_evaluation,
+                                  gen, individual_id, individual, result)
             if (result["fitness_components"] is not None and
                     (self._best_result is None or
                      self._is_better_representative(result["fitness_components"],
@@ -1583,13 +1658,22 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                 self._best_individual = copy.deepcopy(individual)
                 self._best_score = result["fitness_total"]
                 self._representative_changed_this_gen = True
-                self._save_best_candidate()
+                self._safe_disk_write("_save_best_candidate", self._save_best_candidate)
                 # heuristic_best_config.json à jour à CHAQUE amélioration (pas
                 # seulement en fin de fit()) : un crash/kill en cours de route
                 # laisse quand même un fichier canonique exploitable par
                 # results_export.py, sans devoir attendre la fin de la recherche.
-                self._write_best_config_json()
+                self._safe_disk_write("_write_best_config_json", self._write_best_config_json)
         return result
+
+    @staticmethod
+    def _safe_disk_write(label: str, fn, *args) -> None:
+        try:
+            fn(*args)
+        except OSError as exc:   # noqa: BLE001 — jamais interrompre la recherche pour un incident I/O
+            from tqdm.auto import tqdm
+            tqdm.write(f"  [AVERTISSEMENT] écriture disque échouée ({label}) : {exc} — "
+                      "état en mémoire conservé, recherche poursuivie.")
 
     def _is_better_representative(self, cand_comp: dict, best_comp: dict) -> bool:
         """
@@ -1754,7 +1838,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                     xb = X_vl_cpu[s:s + batch_size].to(device)
                     scores_parts.append(model(xb).cpu())
             scores = torch.cat(scores_parts).numpy()
-            scores = np.nan_to_num(scores, nan=0.5, posinf=1.0, neginf=0.0).clip(0.0, 1.0)
+            scores = _sanitize_scores(scores, "evaluate_best_on_full_validation")
 
             if len(np.unique(y_vl)) < 2:
                 self._warn_full_validation("une seule classe présente dans df_val_full — "
