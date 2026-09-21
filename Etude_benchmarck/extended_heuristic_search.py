@@ -249,7 +249,14 @@ BASE_PARAM_SPACE: dict = {
         "fixed_kwargs": {},
     },
 }
-assert set(BASE_PARAM_SPACE.keys()) == set(BASIS_REGISTRY.keys())
+# "sinckan" (SincBasis) a ete ajoute a edges.BASIS_REGISTRY APRES l'Etape 2, pour
+# les besoins du benchmark synthetique isole du Niveau 0 (Etape 3,
+# niveau0_benchmark_iso.py) -- il n'a jamais fait partie du plan de croisement
+# reel de niveau1_harness.GATE_CANDIDATES qui a produit heuristic_best_config.json
+# (aucune configuration d'elite Etape 2 n'utilise SincKAN, et cela reste vrai :
+# on ne reecrit pas GATE_CANDIDATES retroactivement). Exclu explicitement de
+# cette verification de completude plutot que de la casser silencieusement.
+assert set(BASE_PARAM_SPACE.keys()) == set(BASIS_REGISTRY.keys()) - {"sinckan"}
 
 # ── theta_opt : hyperparamètres d'optimisation transversaux (eq. theta_opt) ──
 THETA_OPT_SPACE: dict = {
