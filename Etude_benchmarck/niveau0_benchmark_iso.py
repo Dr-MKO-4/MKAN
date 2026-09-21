@@ -70,9 +70,16 @@ n_seeds sorties (chaque colonne de sortie possede ses propres B=12 parametres,
 totalement independants des autres colonnes -- aucun terme croise dans la
 perte ni dans le forward, donc strictement equivalent a n_seeds entrainements
 separes), ce qui divise par n_seeds le nombre de passes de n_iterations
-necessaires. La latence, elle, ne depend que de l'architecture (forme des
-tenseurs), jamais des poids appris ni de la fonction/graine : elle est mesuree
-UNE SEULE FOIS par base (9 mesures) plutot qu'une fois par triplet (360).
+necessaires. EXCEPTION : fkan (JacobiBasis) partage 3 parametres (alpha/beta/
+gamma) globalement entre TOUTES les sorties, par design documente de la classe
+-- le batcher romprait a la fois le budget iso B=12/replicat (9*n_seeds+3, pas
+12*n_seeds) et l'independance stricte entre graines. fkan est donc TOUJOURS
+entraine par n_seeds passes sequentielles independantes (cf.
+BASES_WITH_SHARED_PARAMS, _run_batch) -- seule base a ne pas beneficier du
+gain de vitesse x5 du batching. La latence, elle, ne depend que de
+l'architecture (forme des tenseurs), jamais des poids appris ni de la
+fonction/graine : elle est mesuree UNE SEULE FOIS par base (9 mesures, y
+compris fkan, toujours avec out_features=1) plutot qu'une fois par triplet (360).
 Consequence sur la reproductibilite : l'initialisation des poids utilise une
 graine UNIQUE partagee par le batch (--init_seed) au lieu de n_seeds appels
 individuels torch.manual_seed(seed) ; le bruit de la famille fc3 reste, lui,
@@ -305,45 +312,34 @@ def _measure_latency(basis_key: str, extra_kwargs: dict,
     return latencies_us.median().item()
 
 
-def _run_batch(basis_label: str, basis_key: str, extra_kwargs: dict,
-               function_name: str, seeds: list, init_seed: int,
-               n_points: int, n_iterations: int, lr: float, grad_clip: float,
-               n_gibbs_dense: int, device: torch.device, pbar_desc: str = None) -> list:
-    """Entraine les n_seeds graines d'un (base, fonction) EN UNE SEULE PASSE :
-    une couche 1 entree -> n_seeds sorties, chaque colonne de sortie disposant
-    de son propre jeu de B_ISO=12 parametres (totalement independants des
-    autres colonnes, cf. forme (in_features, out_features, n_basis) de
-    edges/bases.py) -- entrainer ce batch est mathematiquement identique a
-    entrainer n_seeds couches 1->1 separement (aucun terme croise entre
-    colonnes dans la perte ni dans le forward), mais divise par n_seeds le
-    nombre de passes d'entrainement de 2000 iterations necessaires.
+# Bases dont AU MOINS UN parametre est PARTAGE globalement (pas replique par sortie),
+# par design documente de la classe elle-meme -- cf. JacobiBasis (fkan) : alpha_raw/
+# beta_raw/gamma_raw sont des torch.zeros(1) uniques, pas (in_features, out_features, *).
+# Consequence : une couche out_features=n_seeds pour une de ces bases (a) NE respecte
+# PAS le budget iso B=12/replicat (le total ne scale pas lineairement avec out_features
+# -- ex. fkan : 9*n_seeds + 3, PAS 12*n_seeds) ET (b) couple les gradients des n_seeds
+# colonnes a travers ce parametre partage, ce qui romprait l'independance stricte entre
+# replicats exigee par le protocole (5 graines INDEPENDANTES). Ces bases sont donc
+# TOUJOURS entrainees par n_seeds passes sequentielles independantes (out_features=1
+# chacune, cf. _run_batch, branche "sequentielle"), jamais batchees -- perte du gain de
+# vitesse x5 pour CETTE base uniquement, pas pour les 8 autres.
+BASES_WITH_SHARED_PARAMS = {"fkan"}
 
-    Nuance de reproductibilite (choix valide explicitement, aucun resultat
-    anterieur a preserver) : l'initialisation des poids utilise UNE seule
-    graine (init_seed) pour tout le tenseur batche, et non plus n_seeds appels
-    individuels torch.manual_seed(seed). Le bruit de fc3, en revanche, reste
-    tire colonne par colonne via torch.manual_seed(seeds[s]) (cf.
-    _make_dataset_batched) : chaque replicat a donc toujours SON propre bruit
-    reproductible, seule l'initialisation des poids est mutualisee dans le tirage
-    aleatoire du batch plutot que rejouee individuellement.
 
-    Device : les poids sont TOUJOURS generes sur CPU (_build_layer, torch.randn
-    sans device explicite) puis deplaces vers `device` via .to() -- jamais
-    generes directement sur MPS/CUDA. Les generateurs aleatoires CPU et
-    MPS/CUDA divergent : generer directement sur MPS donnerait des poids
-    initiaux DIFFERENTS de ceux obtenus sur CPU pour le meme init_seed, ce qui
-    rendrait un run --device mps non comparable terme a terme a un run
-    --device cpu. Ce choix garantit l'identite bit-a-bit des poids initiaux
-    quel que soit le device d'entrainement choisi."""
-    fn, x_min, x_max, regime, gate_hint, gibbs_applicable = FUNCTIONS[function_name]
-    n_seeds = len(seeds)
-
-    x_norm, y = _make_dataset_batched(fn, x_min, x_max, n_points, seeds,
-                                       add_fc3_noise=(function_name == "fc3"))
-    x_norm, y = x_norm.to(device), y.to(device)
-
-    torch.manual_seed(init_seed)
-    layer, n_params = _build_layer(basis_key, extra_kwargs, out_features=n_seeds)
+def _train_and_evaluate(basis_key: str, extra_kwargs: dict, out_features: int,
+                         x_norm: torch.Tensor, y: torch.Tensor,
+                         n_iterations: int, lr: float, grad_clip: float, device: torch.device,
+                         fn, x_min: float, x_max: float, gibbs_applicable: bool,
+                         n_gibbs_dense: int, pbar_desc: str):
+    """Coeur d'entrainement partage par les deux branches de _run_batch (vectorisee,
+    sequentielle) : entraine UNE couche a `out_features` colonnes de sortie
+    sur (x_norm, y) pendant n_iterations, puis evalue RMSE/Gibbs/T_90% par colonne.
+    Les poids sont TOUJOURS generes sur CPU (_build_layer, torch.randn sans device
+    explicite) puis deplaces vers `device` via .to() -- jamais generes directement sur
+    MPS/CUDA (les generateurs aleatoires CPU et MPS/CUDA divergent ; generer directement
+    sur MPS donnerait des poids initiaux DIFFERENTS de ceux obtenus sur CPU pour le meme
+    init_seed, rendant un run --device mps non comparable a un run --device cpu)."""
+    layer, n_params = _build_layer(basis_key, extra_kwargs, out_features=out_features)
     layer = layer.to(device)
 
     opt = torch.optim.Adam(layer.parameters(), lr=lr)
@@ -351,31 +347,30 @@ def _run_batch(basis_label: str, basis_key: str, extra_kwargs: dict,
     forward_fn = layer.forward
 
     with torch.no_grad():
-        initial_loss_vec = loss_fn_none(forward_fn(x_norm), y).mean(dim=0)   # (n_seeds,)
+        initial_loss_vec = loss_fn_none(forward_fn(x_norm), y).mean(dim=0)   # (out_features,)
 
-    t90 = [None] * n_seeds
-    converged = [False] * n_seeds
+    t90 = [None] * out_features
+    converged = [False] * out_features
     threshold_vec = 0.10 * initial_loss_vec
     params = list(layer.parameters())
     zero_grad = opt.zero_grad
     step = opt.step
     clip_grad_norm_ = torch.nn.utils.clip_grad_norm_
-    # leave=False : imbriquee sous la barre "Benchmark Niveau 0 (batch de graines)"
-    # (72 combos) -- disparait une fois le combo termine, ne laisse pas 72 barres
-    # figees a l'ecran. mininterval releve (0.2s) : 2000 iterations par combo,
+    # leave=False : imbriquee sous une barre parente qui reste affichee -- disparait
+    # une fois ce (sous-)combo termine. mininterval releve (0.2s) : 2000 iterations,
     # inutile de re-rendre la barre plus souvent que quelques fois par seconde.
     for it in tqdm(range(1, n_iterations + 1), desc=pbar_desc or "entrainement",
                    unit="it", leave=False, mininterval=0.2):
         zero_grad(set_to_none=True)
         pred = forward_fn(x_norm)
-        per_col_loss = loss_fn_none(pred, y).mean(dim=0)   # (n_seeds,) -- independant/colonne
+        per_col_loss = loss_fn_none(pred, y).mean(dim=0)   # (out_features,) -- independant/colonne
         loss = per_col_loss.sum()   # somme de termes independants : gradient par colonne
         loss.backward()             # identique a un entrainement individuel en reduction='mean'
         clip_grad_norm_(params, max_norm=grad_clip)
         step()
         if not all(converged):
             crossed = per_col_loss.detach() < threshold_vec
-            for s in range(n_seeds):
+            for s in range(out_features):
                 if not converged[s] and bool(crossed[s]):
                     t90[s] = it
                     converged[s] = True
@@ -392,6 +387,78 @@ def _run_batch(basis_label: str, basis_key: str, extra_kwargs: dict,
             x_dense_norm, y_dense = x_dense_norm.to(device), y_dense.to(device)
             pred_dense = forward_fn(x_dense_norm)
             gibbs_vec = pred_dense.abs().max(dim=0).values - y_dense.abs().max().item()
+
+    return n_params, rmse_vec, gibbs_vec, t90, converged, initial_loss_vec
+
+
+def _run_batch(basis_label: str, basis_key: str, extra_kwargs: dict,
+               function_name: str, seeds: list, init_seed: int,
+               n_points: int, n_iterations: int, lr: float, grad_clip: float,
+               n_gibbs_dense: int, device: torch.device, pbar_desc: str = None) -> list:
+    """Entraine les n_seeds graines d'un (base, fonction). Deux branches :
+
+    - VECTORISEE (defaut, 8 des 9 bases) : une couche 1 entree -> n_seeds sorties,
+      chaque colonne de sortie disposant de son propre jeu de B_ISO=12 parametres
+      (totalement independants des autres colonnes, cf. forme (in_features,
+      out_features, n_basis) de edges/bases.py) -- entrainer ce batch est
+      mathematiquement identique a entrainer n_seeds couches 1->1 separement (aucun
+      terme croise entre colonnes dans la perte ni dans le forward), mais divise par
+      n_seeds le nombre de passes d'entrainement de 2000 iterations necessaires.
+
+    - SEQUENTIELLE (BASES_WITH_SHARED_PARAMS, actuellement {"fkan"} uniquement) :
+      n_seeds passes INDEPENDANTES separees (out_features=1 chacune), car au moins un
+      parametre de la base est PARTAGE globalement (pas replique par sortie) -- le
+      batcher romprait a la fois le budget iso B=12/replicat et l'independance stricte
+      entre graines exigee par le protocole (cf. BASES_WITH_SHARED_PARAMS).
+
+    Nuance de reproductibilite (choix valide explicitement, aucun resultat
+    anterieur a preserver) : l'initialisation des poids utilise UNE seule graine
+    (init_seed) -- pour le chemin vectorise, un seul tirage batche ; pour le chemin
+    sequentiel, torch.manual_seed(init_seed) est appele UNE FOIS avant la boucle sur
+    les graines (pas reinitialise a chaque graine), pour que les n_seeds tirages
+    successifs restent des valeurs DIFFERENTES (diversite) tout en restant
+    entierement deterministes. Dans les deux cas, ce n'est plus n_seeds appels
+    individuels torch.manual_seed(seed). Le bruit de fc3, en revanche, reste tire
+    colonne par colonne via torch.manual_seed(seeds[s]) (cf. _make_dataset_batched) :
+    chaque replicat a donc toujours SON propre bruit reproductible, quelle que soit
+    la strategie."""
+    fn, x_min, x_max, regime, gate_hint, gibbs_applicable = FUNCTIONS[function_name]
+    n_seeds = len(seeds)
+
+    x_norm, y = _make_dataset_batched(fn, x_min, x_max, n_points, seeds,
+                                       add_fc3_noise=(function_name == "fc3"))
+    x_norm, y = x_norm.to(device), y.to(device)
+
+    if basis_key in BASES_WITH_SHARED_PARAMS:
+        torch.manual_seed(init_seed)
+        n_params = None
+        rmse_parts, gibbs_parts, t90, converged, initial_loss_parts = [], [], [], [], []
+        for s in range(n_seeds):
+            desc = f"{pbar_desc or basis_label} (graine {s + 1}/{n_seeds})"
+            n_params, rmse_s, gibbs_s, t90_s, conv_s, init_s = _train_and_evaluate(
+                basis_key, extra_kwargs, out_features=1,
+                x_norm=x_norm, y=y[:, s:s + 1],
+                n_iterations=n_iterations, lr=lr, grad_clip=grad_clip, device=device,
+                fn=fn, x_min=x_min, x_max=x_max, gibbs_applicable=gibbs_applicable,
+                n_gibbs_dense=n_gibbs_dense, pbar_desc=desc,
+            )
+            rmse_parts.append(rmse_s)
+            gibbs_parts.append(gibbs_s)
+            t90.extend(t90_s)
+            converged.extend(conv_s)
+            initial_loss_parts.append(init_s)
+        rmse_vec = torch.cat(rmse_parts)
+        gibbs_vec = torch.cat(gibbs_parts) if gibbs_applicable else None
+        initial_loss_vec = torch.cat(initial_loss_parts)
+    else:
+        torch.manual_seed(init_seed)
+        n_params, rmse_vec, gibbs_vec, t90, converged, initial_loss_vec = _train_and_evaluate(
+            basis_key, extra_kwargs, out_features=n_seeds,
+            x_norm=x_norm, y=y,
+            n_iterations=n_iterations, lr=lr, grad_clip=grad_clip, device=device,
+            fn=fn, x_min=x_min, x_max=x_max, gibbs_applicable=gibbs_applicable,
+            n_gibbs_dense=n_gibbs_dense, pbar_desc=pbar_desc,
+        )
 
     records = []
     for s, seed in enumerate(seeds):
@@ -722,6 +789,16 @@ def main():
                 "d'un Mac M4), jamais utilise pour une decision."
             ),
             "n_gibbs_dense": args.n_gibbs_dense,
+            "sequential_training_bases": sorted(BASES_WITH_SHARED_PARAMS),
+            "sequential_training_note": (
+                "Bases entrainees par n_seeds passes sequentielles independantes "
+                "(out_features=1 chacune) plutot que par le batching vectorise "
+                "habituel, car au moins un de leurs parametres est PARTAGE "
+                "globalement entre toutes les sorties (ex. fkan/JacobiBasis : "
+                "alpha/beta/gamma) -- le batching romprait le budget iso "
+                "B=12/replicat ET l'independance stricte entre graines. "
+                "Cf. BASES_WITH_SHARED_PARAMS dans le code."
+            ),
             "torch_num_threads": args.num_threads,
             "sinckan_status": (
                 "implemente specifiquement pour ce benchmark (SincBasis, edges/bases.py) "
