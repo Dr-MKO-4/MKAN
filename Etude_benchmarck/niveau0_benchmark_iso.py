@@ -45,6 +45,22 @@ affine du domaine d'entree ne change pas la difficulte d'approximation
 inter-bases -- il est necessaire car les classes de edges/bases.py n'exposent
 pas de decalage de domaine asymetrique (seulement une demi-largeur symetrique).
 
+Strategie de performance (entrainement batche) : les n_seeds replicats d'un
+(base, fonction) sont entraines EN UNE SEULE PASSE via une couche 1 entree ->
+n_seeds sorties (chaque colonne de sortie possede ses propres B=12 parametres,
+totalement independants des autres colonnes -- aucun terme croise dans la
+perte ni dans le forward, donc strictement equivalent a n_seeds entrainements
+separes), ce qui divise par n_seeds le nombre de passes de n_iterations
+necessaires. La latence, elle, ne depend que de l'architecture (forme des
+tenseurs), jamais des poids appris ni de la fonction/graine : elle est mesuree
+UNE SEULE FOIS par base (9 mesures) plutot qu'une fois par triplet (360).
+Consequence sur la reproductibilite : l'initialisation des poids utilise une
+graine UNIQUE partagee par le batch (--init_seed) au lieu de n_seeds appels
+individuels torch.manual_seed(seed) ; le bruit de la famille fc3 reste, lui,
+tire individuellement par replicat (cf. _make_dataset_batched). 'seed' dans
+chaque enregistrement de sortie identifie donc un indice de replicat, pas un
+appel de graine independant pour l'init des poids (metadata.batching_note).
+
 Usage :
     python niveau0_benchmark_iso.py
     python niveau0_benchmark_iso.py --n_seeds 5 --n_iterations 2000 --out_dir extended_search
@@ -114,35 +130,43 @@ FC3_NOISE_STD = 0.05
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Entrainement + mesure d'un triplet (base, fonction, graine)
+# Entrainement batche (5 graines = 5 colonnes de sortie d'une meme couche) +
+# mesure de latence (une seule fois par base, cf. docstring plus bas)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_layer(basis_key: str, extra_kwargs: dict) -> GenericKANLayer:
+def _build_layer(basis_key: str, extra_kwargs: dict, out_features: int = 1):
     cls = BASIS_REGISTRY[basis_key]
     kwargs = dict(cls.budget_kwargs)
     kwargs.update(extra_kwargs)
-    basis = cls(in_features=1, out_features=1, **kwargs)
+    basis = cls(in_features=1, out_features=out_features, **kwargs)
     n_params = sum(p.numel() for p in basis.parameters())
-    if n_params != B_ISO:
+    expected = B_ISO * out_features
+    if n_params != expected:
         raise RuntimeError(
             f"Calibration iso-parametrique rompue pour '{basis_key}' "
-            f"(kwargs={kwargs}) : {n_params} parametres apprenables, attendu {B_ISO}. "
+            f"(kwargs={kwargs}, out_features={out_features}) : {n_params} parametres "
+            f"apprenables, attendu {expected} ({B_ISO}/sortie). "
             f"Verifier budget_kwargs dans edges/bases.py."
         )
-    return GenericKANLayer(basis, in_features=1, out_features=1), n_params
+    return GenericKANLayer(basis, in_features=1, out_features=out_features), n_params // out_features
 
 
-def _make_dataset(fn, x_min: float, x_max: float, n_points: int, seed: int,
-                   add_fc3_noise: bool):
+def _make_dataset_batched(fn, x_min: float, x_max: float, n_points: int, seeds: list,
+                           add_fc3_noise: bool):
+    """x est partage entre les n_seeds colonnes (memes points d'evaluation) ; y a
+    la forme (n_points, n_seeds). Pour fc3, chaque colonne s recoit SON PROPRE
+    bruit, tire via torch.manual_seed(seeds[s]) -- reproductible independamment
+    par graine, meme si l'entrainement lui-meme est batche (cf. docstring module)."""
     x = torch.linspace(x_min, x_max, n_points).unsqueeze(-1)
     if add_fc3_noise:
-        # Bruit tire APRES fixation de la graine, pour reproductibilite exacte
-        # (le calcul de la grille x via linspace ne consomme pas le generateur).
-        torch.manual_seed(seed)
-        noise = torch.randn(n_points, 1) * FC3_NOISE_STD
-        y = fn(x) + noise
+        cols = []
+        for s in seeds:
+            torch.manual_seed(s)
+            noise = torch.randn(n_points, 1) * FC3_NOISE_STD
+            cols.append(fn(x) + noise)
+        y = torch.cat(cols, dim=1)
     else:
-        y = fn(x)
+        y = fn(x).expand(n_points, len(seeds)).contiguous()
     # Normalisation affine du domaine reel [x_min, x_max] -> [-1, 1] pour la
     # couche KAN (cf. docstring du module). La cible y reste evaluee sur x reel.
     # Division precalculee une seule fois (inv_range), multiplication dans le
@@ -156,120 +180,140 @@ def _make_dataset(fn, x_min: float, x_max: float, n_points: int, seed: int,
     return x_norm, y
 
 
-def _run_one(basis_label: str, basis_key: str, extra_kwargs: dict,
-             function_name: str, seed: int,
-             n_points: int, n_iterations: int, lr: float, grad_clip: float,
-             latency_n_calls: int, latency_warmup: int) -> dict:
+def _measure_latency(basis_key: str, extra_kwargs: dict,
+                      latency_n_calls: int, latency_warmup: int) -> float:
+    """La latence de calcul de phi_B ne depend QUE de l'architecture (forme des
+    tenseurs), jamais des valeurs de poids apprises, de la fonction cible ou de
+    la graine -- mesuree ici UNE SEULE FOIS par base (couche 1->1 non entrainee,
+    poids initiaux quelconques) plutot qu'une fois par triplet (base, fonction,
+    graine), ce qui divise par 40 (8 fonctions x 5 graines) le nombre d'appels
+    de mesure necessaires sans rien changer au resultat."""
+    layer, _ = _build_layer(basis_key, extra_kwargs, out_features=1)
+    layer.eval()
+    forward_fn = layer.forward
+    x_probe = torch.zeros(1, 1)
+    with torch.no_grad():
+        for _ in range(latency_warmup):
+            forward_fn(x_probe)
+        t_start = time.perf_counter()
+        for _ in range(latency_n_calls):
+            forward_fn(x_probe)
+        t_end = time.perf_counter()
+    return (t_end - t_start) / latency_n_calls * 1e6
+
+
+def _run_batch(basis_label: str, basis_key: str, extra_kwargs: dict,
+               function_name: str, seeds: list, init_seed: int,
+               n_points: int, n_iterations: int, lr: float, grad_clip: float) -> list:
+    """Entraine les n_seeds graines d'un (base, fonction) EN UNE SEULE PASSE :
+    une couche 1 entree -> n_seeds sorties, chaque colonne de sortie disposant
+    de son propre jeu de B_ISO=12 parametres (totalement independants des
+    autres colonnes, cf. forme (in_features, out_features, n_basis) de
+    edges/bases.py) -- entrainer ce batch est mathematiquement identique a
+    entrainer n_seeds couches 1->1 separement (aucun terme croise entre
+    colonnes dans la perte ni dans le forward), mais divise par n_seeds le
+    nombre de passes d'entrainement de 2000 iterations necessaires.
+
+    Nuance de reproductibilite (choix valide explicitement, aucun resultat
+    anterieur a preserver) : l'initialisation des poids utilise UNE seule
+    graine (init_seed) pour tout le tenseur batche, et non plus n_seeds appels
+    individuels torch.manual_seed(seed). Le bruit de fc3, en revanche, reste
+    tire colonne par colonne via torch.manual_seed(seeds[s]) (cf.
+    _make_dataset_batched) : chaque replicat a donc toujours SON propre bruit
+    reproductible, seule l'initialisation des poids est mutualisee dans le tirage
+    aleatoire du batch plutot que rejouee individuellement."""
     fn, x_min, x_max, regime, gate_hint, gibbs_applicable = FUNCTIONS[function_name]
+    n_seeds = len(seeds)
 
-    x_norm, y = _make_dataset(fn, x_min, x_max, n_points, seed,
-                               add_fc3_noise=(function_name == "fc3"))
+    x_norm, y = _make_dataset_batched(fn, x_min, x_max, n_points, seeds,
+                                       add_fc3_noise=(function_name == "fc3"))
 
-    # Initialisation des poids reproductible et INDEPENDANTE du dataset construit
-    # ci-dessus (evite toute confusion entre "graine du bruit" et "graine des poids").
-    torch.manual_seed(seed)
-    layer, n_params = _build_layer(basis_key, extra_kwargs)
+    torch.manual_seed(init_seed)
+    layer, n_params = _build_layer(basis_key, extra_kwargs, out_features=n_seeds)
 
     opt = torch.optim.Adam(layer.parameters(), lr=lr)
-    loss_fn = nn.MSELoss()
-    forward_fn = layer.forward   # bypass __call__ (aucun hook nn.Module enregistre ici) --
-                                  # meme raisonnement que pour la mesure de latence plus bas,
-                                  # applique ici a la boucle d'entrainement (720 000 appels
-                                  # au total sur l'ensemble du benchmark).
+    loss_fn_none = nn.MSELoss(reduction="none")
+    forward_fn = layer.forward
 
     with torch.no_grad():
-        initial_loss = loss_fn(forward_fn(x_norm), y).item()
+        initial_loss_vec = loss_fn_none(forward_fn(x_norm), y).mean(dim=0)   # (n_seeds,)
 
-    t90 = None
-    converged = False
-    threshold = 0.10 * initial_loss
+    t90 = [None] * n_seeds
+    converged = [False] * n_seeds
+    threshold_vec = 0.10 * initial_loss_vec
     params = list(layer.parameters())
-    # Lookups mis en cache en variables locales : dans CPython, une resolution de
-    # nom local est plus rapide qu'une chaine d'attributs repetee (opt.zero_grad,
-    # torch.nn.utils.clip_grad_norm_, opt.step) -- gain marginal par iteration,
-    # mais la boucle tourne 2000 x 360 = 720 000 fois sur l'ensemble du benchmark.
     zero_grad = opt.zero_grad
     step = opt.step
     clip_grad_norm_ = torch.nn.utils.clip_grad_norm_
     for it in range(1, n_iterations + 1):
-        zero_grad(set_to_none=True)   # evite le memset des gradients (plus rapide que
-                                       # zero_grad() par defaut, cf. recommandation PyTorch
-                                       # pour les modeles a peu de parametres/CPU)
+        zero_grad(set_to_none=True)
         pred = forward_fn(x_norm)
-        loss = loss_fn(pred, y)
-        loss.backward()
+        per_col_loss = loss_fn_none(pred, y).mean(dim=0)   # (n_seeds,) -- independant/colonne
+        loss = per_col_loss.sum()   # somme de termes independants : gradient par colonne
+        loss.backward()             # identique a un entrainement individuel en reduction='mean'
         clip_grad_norm_(params, max_norm=grad_clip)
         step()
-        if not converged and loss.item() < threshold:
-            t90 = it
-            converged = True
+        if not all(converged):
+            crossed = per_col_loss.detach() < threshold_vec
+            for s in range(n_seeds):
+                if not converged[s] and bool(crossed[s]):
+                    t90[s] = it
+                    converged[s] = True
 
     with torch.no_grad():
         pred_final = forward_fn(x_norm)
-        rmse = math.sqrt(loss_fn(pred_final, y).item())
-        gibbs_index = None
+        rmse_vec = loss_fn_none(pred_final, y).mean(dim=0).sqrt()
+        gibbs_vec = None
         if gibbs_applicable:
-            gibbs_index = (pred_final.abs().max().item()
-                            - y.abs().max().item())
+            gibbs_vec = pred_final.abs().max(dim=0).values - y.abs().max(dim=0).values
 
-    # Latence CPU : appels consecutifs sur UN point fixe (le cout de calcul
-    # d'une base KAN ne depend pas de la valeur de x, seulement de sa forme
-    # architecturale ; un seul point suffit et evite le bruit de mesure lie
-    # au rechargement d'un batch a chaque appel).
-    # .forward() est appele directement (plutot que __call__) pour ecarter le
-    # dispatch des hooks nn.Module (aucun hook n'est enregistre nulle part dans
-    # ce projet) : la latence mesuree reflete alors le cout de calcul de la
-    # base elle-meme, pas la machinerie generique de PyTorch autour.
-    layer_cpu = layer.to("cpu")
-    x_probe = x_norm[:1].detach().clone()
-    layer_cpu.eval()
-    forward = layer_cpu.forward
-    with torch.no_grad():
-        for _ in range(latency_warmup):
-            forward(x_probe)
-        t_start = time.perf_counter()
-        for _ in range(latency_n_calls):
-            forward(x_probe)
-        t_end = time.perf_counter()
-    latency_us = (t_end - t_start) / latency_n_calls * 1e6
-
-    return {
-        "base": basis_label,
-        "function": function_name,
-        "seed": seed,
-        "regime": regime,
-        "n_params": n_params,
-        "rmse": rmse,
-        "gibbs_index": gibbs_index,
-        "latency_us": latency_us,
-        "t90_iterations": t90,
-        "converged_90pct": converged,
-        "initial_loss": initial_loss,
-    }
+    records = []
+    for s, seed in enumerate(seeds):
+        records.append({
+            "base": basis_label,
+            "function": function_name,
+            "seed": seed,
+            "regime": regime,
+            "n_params": n_params,
+            "rmse": float(rmse_vec[s].item()),
+            "gibbs_index": float(gibbs_vec[s].item()) if gibbs_vec is not None else None,
+            "t90_iterations": t90[s],
+            "converged_90pct": converged[s],
+            "initial_loss": float(initial_loss_vec[s].item()),
+        })
+    return records
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Orchestration complete
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_benchmark(seeds, n_points: int, n_iterations: int, lr: float,
-                   grad_clip: float, latency_n_calls: int, latency_warmup: int) -> list:
-    triplets = [
-        (basis_label, basis_key, extra_kwargs, function_name, seed)
+def run_benchmark(seeds, n_points: int, n_iterations: int, lr: float, grad_clip: float,
+                   latency_n_calls: int, latency_warmup: int, init_seed: int) -> list:
+    # Latence mesuree UNE FOIS par base (9 mesures, pas 360 -- cf. _measure_latency).
+    latency_by_base = {}
+    for basis_label, basis_key, extra_kwargs in tqdm(
+            BASES_TO_EVALUATE, desc="Mesure de latence (une fois/base)", unit="base"):
+        latency_by_base[basis_label] = _measure_latency(
+            basis_key, extra_kwargs, latency_n_calls, latency_warmup)
+
+    combos = [
+        (basis_label, basis_key, extra_kwargs, function_name)
         for (basis_label, basis_key, extra_kwargs) in BASES_TO_EVALUATE
         for function_name in FUNCTIONS
-        for seed in seeds
     ]
     results = []
-    pbar = tqdm(triplets, desc="Benchmark Niveau 0", unit="run")
-    for basis_label, basis_key, extra_kwargs, function_name, seed in pbar:
-        pbar.set_postfix_str(f"{basis_label}/{function_name}/seed={seed}")
-        record = _run_one(
-            basis_label, basis_key, extra_kwargs, function_name, seed,
+    pbar = tqdm(combos, desc="Benchmark Niveau 0 (batch de graines)", unit="combo")
+    for basis_label, basis_key, extra_kwargs, function_name in pbar:
+        pbar.set_postfix_str(f"{basis_label}/{function_name} ({len(seeds)} graines batchees)")
+        records = _run_batch(
+            basis_label, basis_key, extra_kwargs, function_name, seeds, init_seed,
             n_points=n_points, n_iterations=n_iterations, lr=lr, grad_clip=grad_clip,
-            latency_n_calls=latency_n_calls, latency_warmup=latency_warmup,
         )
-        results.append(record)
+        latency_us = latency_by_base[basis_label]
+        for record in records:
+            record["latency_us"] = latency_us
+        results.extend(records)
     return results
 
 
@@ -320,6 +364,11 @@ def main():
     parser.add_argument("--out_dir", type=str, default="extended_search",
                          help="Repertoire de scratch de sortie (relatif a ce script).")
     parser.add_argument("--out_name", type=str, default="niveau0_benchmark_results.json")
+    parser.add_argument("--init_seed", type=int, default=0,
+                         help="Graine d'initialisation des poids, PARTAGEE par les n_seeds "
+                              "colonnes d'un meme batch (entrainement batche, cf. docstring "
+                              "de _run_batch) -- distincte des graines de bruit de fc3, qui "
+                              "restent individuelles par replicat.")
     parser.add_argument("--num_threads", type=int, default=1,
                          help="torch.set_num_threads() : les modeles ici sont des couches "
                               "1->1 a 12 parametres sur des tenseurs de 1000 points -- le "
@@ -342,6 +391,7 @@ def main():
         seeds=seeds, n_points=args.n_points, n_iterations=args.n_iterations,
         lr=args.lr, grad_clip=args.grad_clip,
         latency_n_calls=args.latency_n_calls, latency_warmup=args.latency_warmup,
+        init_seed=args.init_seed,
     )
 
     etape2_link = _load_etape2_link(project_root)
@@ -354,6 +404,16 @@ def main():
             "n_points": args.n_points,
             "n_iterations": args.n_iterations,
             "seeds": seeds,
+            "init_seed": args.init_seed,
+            "batching_note": (
+                "Les n_seeds graines d'un (base, fonction) sont entrainees en un seul "
+                "batch (couche 1 entree -> n_seeds sorties, colonnes independantes) "
+                "plutot que via n_seeds boucles sequentielles : 'seed' identifie un "
+                "indice de replicat, pas un appel individuel torch.manual_seed(seed) "
+                "pour l'initialisation des poids (init_seed unique, partagee). Le bruit "
+                "de la famille fc3 reste tire individuellement par replicat via "
+                "torch.manual_seed(seed)."
+            ),
             "optimizer": "Adam",
             "lr": args.lr,
             "grad_clip_max_norm": args.grad_clip,
