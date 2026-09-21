@@ -58,15 +58,19 @@ def _load_json(path: str) -> dict:
         return json.load(f)
 
 
-def _retained_justification(gate: str, base: str, decision: dict) -> str:
+def _retained_justification(gate: str, base: str, decision: dict, gate_info: dict) -> str:
+    """Lit les seuils REELLEMENT utilises depuis gate_info (rempli par
+    n0a.preselect_by_gate avec les valeurs effectivement appliquees pour ce run --
+    jamais les constantes par defaut n0a.GIBBS_THRESHOLD/etc., qui seraient fausses
+    si l'appelant a surcharge --gibbs_threshold/--latency_factor/--t90_max)."""
     parts = [
         f"RMSE moyen ({decision['rmse_avg']:.4g}) dans le 1er quartile des bases",
     ]
     if n0a.GATE_TO_REGIME[gate] == 1:
-        parts.append(f"I_Gibbs <= {n0a.GIBBS_THRESHOLD} sur les 3 familles du Regime 1")
+        parts.append(f"I_Gibbs <= {gate_info['gibbs_threshold']} sur les 3 familles du Regime 1")
     parts.append(f"latence ({decision['latency_us']:.4g} us) <= "
-                 f"{n0a.CRITERIA_LATENCY_FACTOR}x la plus rapide")
-    parts.append(f"T_90% median ({decision['t90_avg']:.0f}) < {n0a.CRITERIA_T90_MAX} iterations")
+                 f"{gate_info['latency_factor']}x la plus rapide")
+    parts.append(f"T_90% median ({decision['t90_avg']:.0f}) < {gate_info['t90_max']} iterations")
     justification = "Retenue : " + " ; ".join(parts) + "."
     elite = n0a.ETAPE2_ELITE_BY_GATE.get(gate)
     if elite == base:
@@ -87,7 +91,7 @@ def build_presel_by_gate(preselection: dict) -> dict:
             if decision["retained"]:
                 retained_bases.append({
                     "base": base,
-                    "justification": _retained_justification(gate, base, decision),
+                    "justification": _retained_justification(gate, base, decision, info),
                 })
             else:
                 rejected_bases.append({
@@ -182,6 +186,13 @@ def main():
                          default=os.path.join("extended_search", "top5_configurations.json"))
     parser.add_argument("--out_dir", type=str, default="extended_search")
     parser.add_argument("--out_name", type=str, default="presel_bases_level0.json")
+    parser.add_argument("--gibbs_threshold", type=float, default=n0a.GIBBS_THRESHOLD,
+                         help=f"Doit correspondre au --gibbs_threshold utilise pour "
+                              f"niveau0_analysis.py (defaut = {n0a.GIBBS_THRESHOLD}) -- une "
+                              f"incoherence entre les deux produirait un presel_bases_level0.json "
+                              f"qui ne correspond pas au rapport de synthese.")
+    parser.add_argument("--latency_factor", type=float, default=n0a.CRITERIA_LATENCY_FACTOR)
+    parser.add_argument("--t90_max", type=int, default=n0a.CRITERIA_T90_MAX)
     args = parser.parse_args()
 
     project_root = os.path.dirname(os.path.abspath(__file__))
@@ -195,8 +206,10 @@ def main():
     raw = n0a.load_raw_results(raw_path)
     df = n0a.build_records_df(raw)
     agg = n0a.aggregate(df, raw["metadata"]["n_iterations"])
-    _, _, gibbs_violation_bases = n0a.rank_and_grade(agg)
-    preselection = n0a.preselect_by_gate(agg, gibbs_violation_bases)
+    _, _, gibbs_violation_bases = n0a.rank_and_grade(agg, gibbs_threshold=args.gibbs_threshold)
+    preselection = n0a.preselect_by_gate(
+        agg, gibbs_violation_bases, gibbs_threshold=args.gibbs_threshold,
+        latency_factor=args.latency_factor, t90_max=args.t90_max)
     presel_by_gate = build_presel_by_gate(preselection)
     reduction = compute_search_space_reduction(presel_by_gate)
 
@@ -238,6 +251,21 @@ def main():
             "n_seeds": len(raw["metadata"]["seeds"]),
             "raw_results_md5": _md5_of_file(raw_path),
             "etape2_link": etape2_link,
+            "preselection_thresholds": {
+                "gibbs_threshold": args.gibbs_threshold,
+                "latency_factor": args.latency_factor,
+                "t90_max": args.t90_max,
+                "is_protocol_default": (
+                    args.gibbs_threshold == n0a.GIBBS_THRESHOLD
+                    and args.latency_factor == n0a.CRITERIA_LATENCY_FACTOR
+                    and args.t90_max == n0a.CRITERIA_T90_MAX
+                ),
+                "protocol_defaults": {
+                    "gibbs_threshold": n0a.GIBBS_THRESHOLD,
+                    "latency_factor": n0a.CRITERIA_LATENCY_FACTOR,
+                    "t90_max": n0a.CRITERIA_T90_MAX,
+                },
+            },
         },
         "presel_by_gate": presel_by_gate,
         "search_space_reduction": reduction,

@@ -117,9 +117,14 @@ def aggregate(df: pd.DataFrame, n_iterations: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def rank_and_grade(agg: pd.DataFrame) -> tuple:
+def rank_and_grade(agg: pd.DataFrame, gibbs_threshold: float = GIBBS_THRESHOLD) -> tuple:
     """Retourne (ranking_df, qualification_df) : classement par famille +
-    notation qualitative avec penalite Gibbs absolue (Regime 1)."""
+    notation qualitative avec penalite Gibbs absolue (Regime 1).
+
+    gibbs_threshold : seuil du protocole (0.05 par defaut, step_3.tex). Parametre
+    explicite plutot que constante figee : un assouplissement documente (ex. via
+    --gibbs_threshold en CLI) doit se voir dans la signature de l'appel, jamais
+    en editant silencieusement GIBBS_THRESHOLD en dur dans le code."""
     ranking_rows = []
     for function, grp in agg.groupby("function"):
         grp = grp.sort_values("rmse_median").reset_index(drop=True)
@@ -138,11 +143,11 @@ def rank_and_grade(agg: pd.DataFrame) -> tuple:
             })
     ranking_df = pd.DataFrame(ranking_rows)
 
-    # Penalite Gibbs absolue : une base qui depasse 0.05 sur N'IMPORTE QUELLE
-    # famille du Regime 1 recoit -- pour TOUTES les familles du Regime 1.
+    # Penalite Gibbs absolue : une base qui depasse gibbs_threshold sur N'IMPORTE
+    # QUELLE famille du Regime 1 recoit -- pour TOUTES les familles du Regime 1.
     gibbs_regime1 = agg[agg["regime"] == 1]
     gibbs_violation_bases = set(
-        gibbs_regime1.loc[gibbs_regime1["gibbs_max"] > GIBBS_THRESHOLD, "base"]
+        gibbs_regime1.loc[gibbs_regime1["gibbs_max"] > gibbs_threshold, "base"]
     )
 
     def _final_grade(row):
@@ -166,11 +171,18 @@ def rank_and_grade(agg: pd.DataFrame) -> tuple:
 # Criteres de preselection formels (4 conditions simultanees, eq. criteres_presel)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def preselect_by_gate(agg: pd.DataFrame, gibbs_violation_bases: set) -> dict:
+def preselect_by_gate(agg: pd.DataFrame, gibbs_violation_bases: set,
+                       gibbs_threshold: float = GIBBS_THRESHOLD,
+                       latency_factor: float = CRITERIA_LATENCY_FACTOR,
+                       t90_max: int = CRITERIA_T90_MAX) -> dict:
+    """gibbs_threshold/latency_factor/t90_max : seuils du protocole (step_3.tex),
+    passes explicitement (jamais lus depuis une constante modifiee en dur) pour
+    qu'un assouplissement documente (CLI) soit tracable de bout en bout jusque
+    dans les justifications textuelles produites plus bas."""
     overall_latency = agg.groupby("base")["latency_mean_us"].mean()
     fastest_base = overall_latency.idxmin()
     fastest_latency = overall_latency.min()
-    latency_limit = CRITERIA_LATENCY_FACTOR * fastest_latency
+    latency_limit = latency_factor * fastest_latency
 
     result = {}
     for gate, regime in GATE_TO_REGIME.items():
@@ -196,19 +208,19 @@ def preselect_by_gate(agg: pd.DataFrame, gibbs_violation_bases: set) -> dict:
             if regime == 1 and base in gibbs_violation_bases:
                 gibbs_ok = False
                 reasons_fail.append(
-                    f"I_Gibbs > {GIBBS_THRESHOLD} sur au moins une famille du Regime 1"
+                    f"I_Gibbs > {gibbs_threshold} sur au moins une famille du Regime 1"
                 )
             latency_ok = row["latency"] <= latency_limit
             if not latency_ok:
                 reasons_fail.append(
-                    f"latence ({row['latency']:.4g} us) > {CRITERIA_LATENCY_FACTOR}x "
+                    f"latence ({row['latency']:.4g} us) > {latency_factor}x "
                     f"la plus rapide ({fastest_base}={fastest_latency:.4g} us, "
                     f"seuil={latency_limit:.4g} us)"
                 )
-            t90_ok = row["t90_avg"] < CRITERIA_T90_MAX
+            t90_ok = row["t90_avg"] < t90_max
             if not t90_ok:
                 reasons_fail.append(
-                    f"T_90% median ({row['t90_avg']:.0f}) >= {CRITERIA_T90_MAX} iterations"
+                    f"T_90% median ({row['t90_avg']:.0f}) >= {t90_max} iterations"
                 )
             retained = rmse_ok and gibbs_ok and latency_ok and t90_ok
             bases_decisions[base] = {
@@ -224,20 +236,37 @@ def preselect_by_gate(agg: pd.DataFrame, gibbs_violation_bases: set) -> dict:
             "fastest_base": fastest_base,
             "fastest_latency_us": float(fastest_latency),
             "latency_limit_us": float(latency_limit),
+            "gibbs_threshold": gibbs_threshold,
+            "latency_factor": latency_factor,
+            "t90_max": t90_max,
             "bases": bases_decisions,
         }
     return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Heatmaps (PDF)
+# Heatmaps (Plotly -- convention du projet, pas matplotlib) : chaque figure est
+# ecrite en .html (interactif, toujours possible) ET en .png (statique, via
+# kaleido, pour insertion directe dans le memoire LaTeX). Meme convention que le
+# notebook analyse_resultats_recherche.ipynb (save_fig()) -- si kaleido est
+# indisponible, seul le .html est produit et un avertissement est imprime,
+# jamais un echec silencieux ni un plantage du reste du pipeline.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def plot_rmse_heatmap(agg: pd.DataFrame, out_path: str) -> None:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.colors import LogNorm
+def _save_fig(fig, out_path_no_ext: str) -> None:
+    os.makedirs(os.path.dirname(out_path_no_ext) or ".", exist_ok=True)
+    html_path = out_path_no_ext + ".html"
+    png_path = out_path_no_ext + ".png"
+    fig.write_html(html_path)
+    try:
+        fig.write_image(png_path, scale=2)
+    except Exception as exc:   # kaleido peut manquer selon l'environnement
+        print(f"[avertissement] export PNG impossible pour {out_path_no_ext} ({exc}) -- "
+              f"HTML seul disponible ({html_path}).")
+
+
+def plot_rmse_heatmap(agg: pd.DataFrame, out_path_no_ext: str) -> None:
+    import plotly.graph_objects as go
 
     pivot = agg.pivot(index="base", columns="function", values="rmse_median")
     cols = [c for c in REGIME_ORDER if c in pivot.columns]
@@ -245,49 +274,38 @@ def plot_rmse_heatmap(agg: pd.DataFrame, out_path: str) -> None:
     bases = list(pivot.index)
     data = pivot.values.astype(float)
     data_safe = np.where(data <= 0, np.nextafter(0, 1), data)
+    log_data = np.log10(data_safe)
 
-    fig, ax = plt.subplots(figsize=(1.3 * len(cols) + 2, 0.55 * len(bases) + 2))
-    norm = LogNorm(vmin=max(data_safe.min(), 1e-6), vmax=data_safe.max())
-    im = ax.imshow(data_safe, cmap="viridis_r", norm=norm, aspect="auto")
-
-    ax.set_xticks(range(len(cols)))
-    ax.set_xticklabels(cols)
-    ax.set_yticks(range(len(bases)))
-    ax.set_yticklabels(bases)
-
-    for i in range(len(bases)):
-        for j in range(len(cols)):
-            val = data[i, j]
-            text = f"{val:.3g}"
-            ax.text(j, i, text, ha="center", va="center", fontsize=7,
-                    color="white" if data_safe[i, j] > np.sqrt(data_safe.min() * data_safe.max())
-                    else "black")
+    fig = go.Figure(go.Heatmap(
+        z=log_data, x=cols, y=bases,
+        colorscale="Viridis_r",
+        text=[[f"{v:.3g}" for v in row] for row in data],
+        texttemplate="%{text}", textfont={"size": 10},
+        colorbar=dict(title="RMSE (log10)"),
+        hovertemplate="base=%{y}<br>fonction=%{x}<br>RMSE=%{text}<extra></extra>",
+    ))
 
     # Separateurs visuels entre les 3 regimes (fs*/fc*/fo*)
-    regime_boundaries = []
     prev_regime = None
     for j, c in enumerate(cols):
         regime = 1 if c.startswith("fs") else (2 if c.startswith("fc") else 3)
         if prev_regime is not None and regime != prev_regime:
-            regime_boundaries.append(j - 0.5)
+            fig.add_shape(type="line", x0=j - 0.5, x1=j - 0.5, y0=-0.5, y1=len(bases) - 0.5,
+                          line=dict(color="black", width=2))
         prev_regime = regime
-    for b in regime_boundaries:
-        ax.axvline(b, color="black", linewidth=2)
 
-    ax.set_title("RMSE median (echelle log) -- Benchmark synthetique iso-parametrique Niveau 0")
-    fig.colorbar(im, ax=ax, label="RMSE (log)")
-    fig.tight_layout()
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    fig.savefig(out_path)
-    plt.close(fig)
+    fig.update_layout(
+        title="RMSE median (echelle log10) -- Benchmark synthetique iso-parametrique Niveau 0",
+        xaxis_title="Fonction", yaxis_title="Base",
+        template="plotly_white",
+        height=max(350, 55 * len(bases) + 150), width=max(500, 130 * len(cols) + 200),
+    )
+    _save_fig(fig, out_path_no_ext)
 
 
-def plot_gibbs_heatmap(agg: pd.DataFrame, out_path: str) -> None:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.colors import TwoSlopeNorm
-    from matplotlib.patches import Rectangle
+def plot_gibbs_heatmap(agg: pd.DataFrame, out_path_no_ext: str,
+                        gibbs_threshold: float = GIBBS_THRESHOLD) -> None:
+    import plotly.graph_objects as go
 
     regime1_cols = REGIME_FUNCTIONS[1]
     sub = agg[agg["function"].isin(regime1_cols)]
@@ -297,37 +315,37 @@ def plot_gibbs_heatmap(agg: pd.DataFrame, out_path: str) -> None:
     cols = list(pivot.columns)
     data = pivot.values.astype(float)
 
-    vmax = max(float(np.nanmax(data)), GIBBS_THRESHOLD * 1.5)
+    vmax = max(float(np.nanmax(data)), gibbs_threshold * 1.5)
     vmin = min(float(np.nanmin(data)), 0.0)
-    norm = TwoSlopeNorm(vmin=vmin, vcenter=GIBBS_THRESHOLD, vmax=vmax)
+    # Point milieu de l'echelle de couleur cale sur le seuil critique (equivalent
+    # de TwoSlopeNorm(vcenter=gibbs_threshold)) -- proportion normalisee dans [0,1].
+    mid = (gibbs_threshold - vmin) / (vmax - vmin) if vmax > vmin else 0.5
+    mid = min(max(mid, 0.0), 1.0)
+    colorscale = [[0.0, "green"], [mid, "yellow"], [1.0, "red"]]
 
-    fig, ax = plt.subplots(figsize=(1.6 * len(cols) + 2, 0.55 * len(bases) + 2))
-    im = ax.imshow(data, cmap="RdYlGn_r", norm=norm, aspect="auto")
+    fig = go.Figure(go.Heatmap(
+        z=data, x=cols, y=bases, zmin=vmin, zmax=vmax, colorscale=colorscale,
+        text=[[f"{v:.3g}" for v in row] for row in data],
+        texttemplate="%{text}", textfont={"size": 11},
+        colorbar=dict(title="I_Gibbs"),
+        hovertemplate="base=%{y}<br>fonction=%{x}<br>I_Gibbs=%{text}<extra></extra>",
+    ))
 
-    ax.set_xticks(range(len(cols)))
-    ax.set_xticklabels(cols)
-    ax.set_yticks(range(len(bases)))
-    ax.set_yticklabels(bases)
+    # Cadre rouge autour des cellules qui depassent le seuil critique.
+    for i, base in enumerate(bases):
+        for j, col in enumerate(cols):
+            if data[i, j] > gibbs_threshold:
+                fig.add_shape(type="rect", x0=j - 0.5, x1=j + 0.5, y0=i - 0.5, y1=i + 0.5,
+                              line=dict(color="red", width=3), fillcolor="rgba(0,0,0,0)")
 
-    for i in range(len(bases)):
-        for j in range(len(cols)):
-            val = data[i, j]
-            violates = val > GIBBS_THRESHOLD
-            ax.text(j, i, f"{val:.3g}", ha="center", va="center", fontsize=8,
-                    fontweight="bold" if violates else "normal",
-                    color="black")
-            if violates:
-                ax.add_patch(Rectangle((j - 0.5, i - 0.5), 1, 1, fill=False,
-                                        edgecolor="red", linewidth=2.5))
-
-    ax.set_title(f"Indice de Gibbs I_Gibbs -- Regime 1 uniquement "
-                 f"(seuil critique = {GIBBS_THRESHOLD}, cadre rouge = depassement)")
-    cbar = fig.colorbar(im, ax=ax, label="I_Gibbs")
-    cbar.ax.axhline(GIBBS_THRESHOLD, color="black", linewidth=1.5)
-    fig.tight_layout()
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    fig.savefig(out_path)
-    plt.close(fig)
+    fig.update_layout(
+        title=f"Indice de Gibbs I_Gibbs -- Regime 1 uniquement "
+              f"(seuil critique = {gibbs_threshold}, cadre rouge = depassement)",
+        xaxis_title="Fonction", yaxis_title="Base",
+        template="plotly_white",
+        height=max(350, 55 * len(bases) + 150), width=max(500, 160 * len(cols) + 200),
+    )
+    _save_fig(fig, out_path_no_ext)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -343,6 +361,16 @@ def write_report(preselection: dict, out_path: str, raw_metadata: dict) -> None:
     lines.append(f"Base sur {raw_metadata.get('n_points')} points, "
                  f"{raw_metadata.get('n_iterations')} iterations, "
                  f"{len(raw_metadata.get('seeds', []))} graines.")
+    any_gate = next(iter(preselection.values()), None)
+    if any_gate is not None:
+        lines.append(
+            f"Seuils de preselection utilises pour ce rapport : "
+            f"I_Gibbs <= {any_gate.get('gibbs_threshold', GIBBS_THRESHOLD)} ; "
+            f"latence <= {any_gate.get('latency_factor', CRITERIA_LATENCY_FACTOR)}x "
+            f"la plus rapide ; T_90% < {any_gate.get('t90_max', CRITERIA_T90_MAX)} "
+            f"iterations. (Valeurs par defaut du protocole step_3.tex sauf si "
+            f"surchargees explicitement via --gibbs_threshold/--latency_factor/--t90_max.)"
+        )
     lines.append("")
 
     for gate, info in preselection.items():
@@ -418,6 +446,17 @@ def main():
     parser.add_argument("--raw_path", type=str,
                          default=os.path.join("extended_search", "niveau0_benchmark_results.json"))
     parser.add_argument("--out_dir", type=str, default="niveau0_analysis")
+    parser.add_argument("--gibbs_threshold", type=float, default=GIBBS_THRESHOLD,
+                         help=f"Seuil I_Gibbs du protocole (defaut step_3.tex = {GIBBS_THRESHOLD}). "
+                              f"Un assouplissement documente (ex. 0.10) doit passer par ce flag, "
+                              f"jamais par une edition silencieuse de la constante dans le code.")
+    parser.add_argument("--latency_factor", type=float, default=CRITERIA_LATENCY_FACTOR,
+                         help=f"Facteur du critere de latence (defaut = {CRITERIA_LATENCY_FACTOR}x "
+                              f"la base la plus rapide).")
+    parser.add_argument("--t90_max", type=int, default=CRITERIA_T90_MAX,
+                         help=f"Budget T_90% maximal en iterations (defaut = {CRITERIA_T90_MAX}, "
+                              f"doit correspondre a --n_iterations du run niveau0_benchmark_iso.py "
+                              f"sous-jacent pour rester coherent).")
     args = parser.parse_args()
 
     project_root = os.path.dirname(os.path.abspath(__file__))
@@ -430,8 +469,11 @@ def main():
     n_iterations = raw["metadata"]["n_iterations"]
 
     agg = aggregate(df, n_iterations)
-    ranking_df, qualification_df, gibbs_violation_bases = rank_and_grade(agg)
-    preselection = preselect_by_gate(agg, gibbs_violation_bases)
+    ranking_df, qualification_df, gibbs_violation_bases = rank_and_grade(
+        agg, gibbs_threshold=args.gibbs_threshold)
+    preselection = preselect_by_gate(
+        agg, gibbs_violation_bases, gibbs_threshold=args.gibbs_threshold,
+        latency_factor=args.latency_factor, t90_max=args.t90_max)
 
     agg_path = os.path.join(out_dir, "niveau0_aggregation.csv")
     ranking_path = os.path.join(out_dir, "niveau0_ranking.csv")
@@ -444,7 +486,7 @@ def main():
     ranking_df.to_csv(ranking_path, index=False, encoding="utf-8")
     qualification_df.to_csv(qualif_path, encoding="utf-8")
     plot_rmse_heatmap(agg, rmse_heatmap_path)
-    plot_gibbs_heatmap(agg, gibbs_heatmap_path)
+    plot_gibbs_heatmap(agg, gibbs_heatmap_path, gibbs_threshold=args.gibbs_threshold)
     write_report(preselection, report_path, raw["metadata"])
 
     print(f"Agregation ecrite : {agg_path}")
