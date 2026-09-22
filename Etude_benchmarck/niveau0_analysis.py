@@ -6,7 +6,9 @@ Lit les resultats bruts produits par niveau0_benchmark_iso.py (module 3.1) et
 produit :
   - une agregation statistique sur les 5 graines par (base, famille de fonctions)
   - un classement par famille avec notation qualitative (++ / + / +- / - / --)
-  - deux heatmaps PDF (RMSE log-scale, I_Gibbs Regime 1)
+  - deux heatmaps Plotly (convention du projet, pas matplotlib) -- RMSE log-scale,
+    I_Gibbs Regime 1 -- chacune ecrite en .html (interactif) et .png (via kaleido,
+    pour insertion dans le memoire LaTeX)
   - un rapport de synthese texte : bases retenues/rejetees par porte, avec
     verification de coherence par rapport a l'Etape 2 (heuristic_best_config.json)
 
@@ -297,6 +299,7 @@ def plot_rmse_heatmap(agg: pd.DataFrame, out_path_no_ext: str) -> None:
     fig.update_layout(
         title="RMSE median (echelle log10) -- Benchmark synthetique iso-parametrique Niveau 0",
         xaxis_title="Fonction", yaxis_title="Base",
+        yaxis=dict(autorange="reversed"),   # 1ere base en haut (convention matplotlib/imshow)
         template="plotly_white",
         height=max(350, 55 * len(bases) + 150), width=max(500, 130 * len(cols) + 200),
     )
@@ -342,6 +345,7 @@ def plot_gibbs_heatmap(agg: pd.DataFrame, out_path_no_ext: str,
         title=f"Indice de Gibbs I_Gibbs -- Regime 1 uniquement "
               f"(seuil critique = {gibbs_threshold}, cadre rouge = depassement)",
         xaxis_title="Fonction", yaxis_title="Base",
+        yaxis=dict(autorange="reversed"),
         template="plotly_white",
         height=max(350, 55 * len(bases) + 150), width=max(500, 160 * len(cols) + 200),
     )
@@ -478,22 +482,22 @@ def main():
     agg_path = os.path.join(out_dir, "niveau0_aggregation.csv")
     ranking_path = os.path.join(out_dir, "niveau0_ranking.csv")
     qualif_path = os.path.join(out_dir, "niveau0_qualification_matrix.csv")
-    rmse_heatmap_path = os.path.join(out_dir, "niveau0_heatmap_rmse.pdf")
-    gibbs_heatmap_path = os.path.join(out_dir, "niveau0_heatmap_gibbs.pdf")
+    rmse_heatmap_stem = os.path.join(out_dir, "niveau0_heatmap_rmse")
+    gibbs_heatmap_stem = os.path.join(out_dir, "niveau0_heatmap_gibbs")
     report_path = os.path.join(out_dir, "niveau0_rapport_synthese.txt")
 
     agg.to_csv(agg_path, index=False, encoding="utf-8")
     ranking_df.to_csv(ranking_path, index=False, encoding="utf-8")
     qualification_df.to_csv(qualif_path, encoding="utf-8")
-    plot_rmse_heatmap(agg, rmse_heatmap_path)
-    plot_gibbs_heatmap(agg, gibbs_heatmap_path, gibbs_threshold=args.gibbs_threshold)
+    plot_rmse_heatmap(agg, rmse_heatmap_stem)
+    plot_gibbs_heatmap(agg, gibbs_heatmap_stem, gibbs_threshold=args.gibbs_threshold)
     write_report(preselection, report_path, raw["metadata"])
 
     print(f"Agregation ecrite : {agg_path}")
     print(f"Classement ecrit : {ranking_path}")
     print(f"Matrice de qualification ecrite : {qualif_path}")
-    print(f"Heatmap RMSE ecrite : {rmse_heatmap_path}")
-    print(f"Heatmap Gibbs ecrite : {gibbs_heatmap_path}")
+    print(f"Heatmap RMSE ecrite : {rmse_heatmap_stem}.html / .png")
+    print(f"Heatmap Gibbs ecrite : {gibbs_heatmap_stem}.html / .png")
     print(f"Rapport de synthese ecrit : {report_path}")
 
     return {
@@ -501,8 +505,12 @@ def main():
         "preselection": preselection, "gibbs_violation_bases": gibbs_violation_bases,
         "paths": {
             "aggregation_csv": agg_path, "ranking_csv": ranking_path,
-            "qualification_csv": qualif_path, "rmse_heatmap_pdf": rmse_heatmap_path,
-            "gibbs_heatmap_pdf": gibbs_heatmap_path, "report_txt": report_path,
+            "qualification_csv": qualif_path,
+            "rmse_heatmap_html": rmse_heatmap_stem + ".html",
+            "rmse_heatmap_png": rmse_heatmap_stem + ".png",
+            "gibbs_heatmap_html": gibbs_heatmap_stem + ".html",
+            "gibbs_heatmap_png": gibbs_heatmap_stem + ".png",
+            "report_txt": report_path,
         },
     }
 
