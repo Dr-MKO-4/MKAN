@@ -24,6 +24,7 @@ d'exécution du protocole (§8) doit appeler une fois par configuration.
 
 import argparse
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -31,6 +32,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import torch
+from tqdm import tqdm
 
 from lstm_cell import ConfigurableMKANScorer
 from gru_cell import GRUMKANScorer, match_gru_hidden_size
@@ -181,23 +183,59 @@ def _get_device(name: str):
     return torch.device(name)
 
 
-def run_config(cfg: RunConfig, train_path: str, val_path: str) -> dict:
-    """Entraîne UNE configuration et rapporte les métriques (protocole §5)."""
+def load_and_window(train_path: str, val_path: str, regime: str, W: int,
+                     max_accounts: Optional[int] = None) -> dict:
+    """Isole la partie COUTEUSE et INDEPENDANTE des choix de bases/graine de
+    run_config (lecture parquet, construction du regime, standardisation,
+    fenetrage par compte) : ne depend que de (regime, W). Un appelant qui
+    balaie de nombreux (cell_type, gate_bases, seed) pour un meme (regime, W)
+    fixe (ex. plan de croisement Niveau 1) doit appeler CETTE fonction UNE
+    SEULE FOIS par (regime, W) distinct et reutiliser son resultat via
+    run_config(..., precomputed=...) plutot que de laisser run_config
+    relire/refenetrer les memes donnees a chaque run (365 runs pour
+    seulement 4 combinaisons (regime, W) distinctes dans le plan Niveau 1 --
+    fenetrage par compte en boucle Python, le poste le plus couteux hors
+    entrainement lui-meme)."""
+    df_train = pd.read_parquet(train_path)
+    df_val   = pd.read_parquet(val_path)
+
+    df_train, feature_cols = build_regime_frame(df_train, regime)
+    df_val, _              = build_regime_frame(df_val, regime)
+    stats = standardize(df_train, feature_cols)
+    standardize(df_val, feature_cols, stats=stats)
+
+    X_train, y_train = build_windows(df_train, W, feature_cols, max_accounts)
+    X_val,   y_val   = build_windows(df_val,   W, feature_cols, max_accounts)
+
+    return {
+        "X_train_t": torch.from_numpy(X_train), "y_train_t": torch.from_numpy(y_train),
+        "X_val": X_val, "y_val": y_val,
+        "input_size": len(feature_cols), "feature_cols": feature_cols,
+    }
+
+
+def run_config(cfg: RunConfig, train_path: str, val_path: str,
+               return_model: bool = False, precomputed: Optional[dict] = None) -> dict:
+    """Entraîne UNE configuration et rapporte les métriques (protocole §5).
+
+    precomputed : resultat de load_and_window(..., cfg.regime, cfg.W,
+    cfg.max_accounts), reutilisable tel quel pour tout run PARTAGEANT le meme
+    (regime, W, max_accounts) -- evite de relire/refenetrer les donnees a
+    chaque appel (cf. docstring de load_and_window). Si absent, comportement
+    inchange : chargement autonome comme avant (retro-compatible, protocole
+    108-runs existant non affecte)."""
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
     device = _get_device(cfg.device)
 
-    df_train = pd.read_parquet(train_path)
-    df_val   = pd.read_parquet(val_path)
+    if precomputed is None:
+        precomputed = load_and_window(train_path, val_path, cfg.regime, cfg.W, cfg.max_accounts)
 
-    df_train, feature_cols = build_regime_frame(df_train, cfg.regime)
-    df_val, _              = build_regime_frame(df_val, cfg.regime)
-    stats = standardize(df_train, feature_cols)
-    standardize(df_val, feature_cols, stats=stats)
-
-    X_train, y_train = build_windows(df_train, cfg.W, feature_cols, cfg.max_accounts)
-    X_val,   y_val   = build_windows(df_val,   cfg.W, feature_cols, cfg.max_accounts)
-    input_size = len(feature_cols)
+    X_train_t = precomputed["X_train_t"]
+    y_train_t = precomputed["y_train_t"]
+    X_val     = precomputed["X_val"]
+    y_val     = precomputed["y_val"]
+    input_size = precomputed["input_size"]
 
     if cfg.cell_type == "lstm":
         model = ConfigurableMKANScorer(input_size, cfg.hidden_size,
@@ -211,14 +249,23 @@ def run_config(cfg: RunConfig, train_path: str, val_path: str) -> dict:
     model.to(device)
 
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr)
-    X_train_t = torch.from_numpy(X_train)
-    y_train_t = torch.from_numpy(y_train)
     n = X_train_t.shape[0]
 
     t0 = time.time()
-    for epoch in range(cfg.epochs):
+    n_batches = math.ceil(n / cfg.batch_size)
+    epoch_pbar = tqdm(range(cfg.epochs), desc="epoques", unit="ep", leave=False)
+    for epoch in epoch_pbar:
         perm = torch.randperm(n)
-        for i in range(0, n, cfg.batch_size):
+        # leave=False : imbriquee sous epoch_pbar (elle-meme imbriquee sous la
+        # barre exterieure du plan de croisement, niveau1_benchmark_run.py) --
+        # le nombre de batches par epoque (n windows / batch_size) est souvent
+        # bien plus grand que le nombre d'epoques, donc c'est ICI que la
+        # visibilite de progression compte le plus.
+        batch_pbar = tqdm(range(0, n, cfg.batch_size), total=n_batches,
+                           desc=f"epoque {epoch + 1}/{cfg.epochs}", unit="batch",
+                           leave=False, mininterval=0.3)
+        last_loss = None
+        for i in batch_pbar:
             idx = perm[i:i + cfg.batch_size]
             xb = X_train_t[idx].to(device)
             yb = y_train_t[idx].to(device)
@@ -227,6 +274,9 @@ def run_config(cfg: RunConfig, train_path: str, val_path: str) -> dict:
                 model, xb, yb, lam=cfg.lam, mu1=cfg.mu1, mu2=cfg.mu2)
             loss_total.backward()
             opt.step()
+            last_loss = loss_total.item()
+            batch_pbar.set_postfix_str(f"loss={last_loss:.4f}")
+        epoch_pbar.set_postfix_str(f"loss={last_loss:.4f}" if last_loss is not None else "")
     train_time = time.time() - t0
 
     n_params = sum(p.numel() for p in model.parameters())
@@ -243,18 +293,32 @@ def run_config(cfg: RunConfig, train_path: str, val_path: str) -> dict:
         "n_train_windows": int(n),
         "n_val_windows": int(len(X_val)),
     })
+    if return_model:
+        # Prefixe "_" : champs non serialisables (nn.Module, tenseurs) a retirer
+        # par l'appelant avant tout json.dump -- reserves au calcul, dans le
+        # script appelant, de metriques qui necessitent le modele/les donnees
+        # brutes (latence, R2_symbolic) sans dupliquer la logique d'entrainement
+        # ni introduire un import circulaire vers extended_heuristic_search.py
+        # (qui importe deja CE module).
+        metrics["_model"] = model
+        metrics["_input_size"] = input_size
+        metrics["_X_train_pool"] = X_train_t
     return metrics
 
 
 def compute_metrics(y_true: np.ndarray, scores: np.ndarray) -> dict:
     from sklearn.metrics import (roc_auc_score, average_precision_score,
-                                  precision_recall_curve, brier_score_loss, f1_score)
+                                  precision_recall_curve, brier_score_loss, f1_score,
+                                  matthews_corrcoef)
     out = {}
     if len(np.unique(y_true)) < 2:
         return {"auc_roc": float("nan"), "auc_pr": float("nan")}
     out["auc_roc"] = roc_auc_score(y_true, scores)
     out["auc_pr"]  = average_precision_score(y_true, scores)
     out["brier"]   = brier_score_loss(y_true, scores)
+    # MCC au seuil standard 0.5 -- cf. compute_fitness (extended_heuristic_search.py),
+    # meme convention (MCC_clipped = max(0, MCC) applique par l'appelant, pas ici).
+    out["mcc"] = float(matthews_corrcoef(y_true, (scores >= 0.5).astype(int)))
 
     precision, recall, _ = precision_recall_curve(y_true, scores)
     for target_recall in (0.5, 0.8):

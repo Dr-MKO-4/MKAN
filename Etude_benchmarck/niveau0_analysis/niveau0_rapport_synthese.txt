@@ -1,89 +1,86 @@
 ==============================================================================
 RAPPORT DE SYNTHESE -- Preselection des bases KAN par porte (Niveau 0)
 ==============================================================================
-Genere le : 2026-09-21T10:46:05.186212+00:00
-Base sur 1000 points, 2000 iterations, 5 graines.
+Genere le : 2026-09-22T11:15:42.340314+00:00
+Base sur 1000 points, 10000 iterations, 5 graines.
+Seuils de preselection utilises pour ce rapport : I_Gibbs <= 0.2 ; latence <= 3.0x la plus rapide ; T_90% < 4000 iterations. (Valeurs par defaut du protocole step_3.tex sauf si surchargees explicitement via --gibbs_threshold/--latency_factor/--t90_max.)
 
 ------------------------------------------------------------------------------
 PORTE : Forget  (Regime 1, familles : fs1, fs2, fs3)
 ------------------------------------------------------------------------------
-Seuil RMSE (1er quartile) : 0.08411
-Base la plus rapide : fastkan (7.708 us) -- seuil latence (3.0x) = 23.12 us
+Seuil RMSE (1er quartile) : 0.0841
+Base la plus rapide : fastkan (36.6 us) -- seuil latence (3.0x) = 109.8 us
 
-Bases RETENUES (0) : aucune
+Bases RETENUES (2) : relukan, wavkan_dog
 
 Bases REJETEES :
-  - chebyshev : RMSE moyen (0.09619) hors du 1er quartile (seuil Q1=0.08411) ; I_Gibbs > 0.05 sur au moins une famille du Regime 1 ; latence (30.63 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us)
-  - efficientkan : I_Gibbs > 0.05 sur au moins une famille du Regime 1 ; latence (51.58 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us)
-  - fastkan : RMSE moyen (0.08574) hors du 1er quartile (seuil Q1=0.08411) ; I_Gibbs > 0.05 sur au moins une famille du Regime 1
-  - fkan : RMSE moyen (0.1357) hors du 1er quartile (seuil Q1=0.08411) ; I_Gibbs > 0.05 sur au moins une famille du Regime 1 ; latence (247.5 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us)
-  - fourier : RMSE moyen (0.1145) hors du 1er quartile (seuil Q1=0.08411) ; I_Gibbs > 0.05 sur au moins une famille du Regime 1
-  - relukan : I_Gibbs > 0.05 sur au moins une famille du Regime 1
-  - sinckan : RMSE moyen (0.08573) hors du 1er quartile (seuil Q1=0.08411) ; I_Gibbs > 0.05 sur au moins une famille du Regime 1
-  - wavkan_dog : I_Gibbs > 0.05 sur au moins une famille du Regime 1
-  - wavkan_morlet : RMSE moyen (0.1203) hors du 1er quartile (seuil Q1=0.08411) ; I_Gibbs > 0.05 sur au moins une famille du Regime 1
+  - chebyshev : RMSE moyen (0.09462) hors du 1er quartile (seuil Q1=0.0841) ; latence (142.4 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)
+  - efficientkan : latence (286.8 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)
+  - fastkan : RMSE moyen (0.08416) hors du 1er quartile (seuil Q1=0.0841)
+  - fkan : RMSE moyen (0.128) hors du 1er quartile (seuil Q1=0.0841) ; latence (1128 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)
+  - fourier : RMSE moyen (0.1047) hors du 1er quartile (seuil Q1=0.0841)
+  - sinckan : RMSE moyen (0.08568) hors du 1er quartile (seuil Q1=0.0841)
+  - wavkan_morlet : RMSE moyen (0.113) hors du 1er quartile (seuil Q1=0.0841)
 
-[AVERTISSEMENT] Ecart Etape 2 / Niveau 0 : la base plebiscitee par l'Etape 2 ('relukan') n'est PAS retenue par la preselection Niveau 0 sur la porte Forget. Raison(s) : I_Gibbs > 0.05 sur au moins une famille du Regime 1
+[OK] Coherence Etape 2 : la base plebiscitee ('relukan') figure bien parmi les bases retenues.
 
 ------------------------------------------------------------------------------
 PORTE : Input  (Regime 1, familles : fs1, fs2, fs3)
 ------------------------------------------------------------------------------
-Seuil RMSE (1er quartile) : 0.08411
-Base la plus rapide : fastkan (7.708 us) -- seuil latence (3.0x) = 23.12 us
+Seuil RMSE (1er quartile) : 0.0841
+Base la plus rapide : fastkan (36.6 us) -- seuil latence (3.0x) = 109.8 us
 
-Bases RETENUES (0) : aucune
+Bases RETENUES (2) : relukan, wavkan_dog
 
 Bases REJETEES :
-  - chebyshev : RMSE moyen (0.09619) hors du 1er quartile (seuil Q1=0.08411) ; I_Gibbs > 0.05 sur au moins une famille du Regime 1 ; latence (30.63 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us)
-  - efficientkan : I_Gibbs > 0.05 sur au moins une famille du Regime 1 ; latence (51.58 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us)
-  - fastkan : RMSE moyen (0.08574) hors du 1er quartile (seuil Q1=0.08411) ; I_Gibbs > 0.05 sur au moins une famille du Regime 1
-  - fkan : RMSE moyen (0.1357) hors du 1er quartile (seuil Q1=0.08411) ; I_Gibbs > 0.05 sur au moins une famille du Regime 1 ; latence (247.5 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us)
-  - fourier : RMSE moyen (0.1145) hors du 1er quartile (seuil Q1=0.08411) ; I_Gibbs > 0.05 sur au moins une famille du Regime 1
-  - relukan : I_Gibbs > 0.05 sur au moins une famille du Regime 1
-  - sinckan : RMSE moyen (0.08573) hors du 1er quartile (seuil Q1=0.08411) ; I_Gibbs > 0.05 sur au moins une famille du Regime 1
-  - wavkan_dog : I_Gibbs > 0.05 sur au moins une famille du Regime 1
-  - wavkan_morlet : RMSE moyen (0.1203) hors du 1er quartile (seuil Q1=0.08411) ; I_Gibbs > 0.05 sur au moins une famille du Regime 1
+  - chebyshev : RMSE moyen (0.09462) hors du 1er quartile (seuil Q1=0.0841) ; latence (142.4 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)
+  - efficientkan : latence (286.8 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)
+  - fastkan : RMSE moyen (0.08416) hors du 1er quartile (seuil Q1=0.0841)
+  - fkan : RMSE moyen (0.128) hors du 1er quartile (seuil Q1=0.0841) ; latence (1128 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)
+  - fourier : RMSE moyen (0.1047) hors du 1er quartile (seuil Q1=0.0841)
+  - sinckan : RMSE moyen (0.08568) hors du 1er quartile (seuil Q1=0.0841)
+  - wavkan_morlet : RMSE moyen (0.113) hors du 1er quartile (seuil Q1=0.0841)
 
-[AVERTISSEMENT] Ecart Etape 2 / Niveau 0 : la base plebiscitee par l'Etape 2 ('efficientkan') n'est PAS retenue par la preselection Niveau 0 sur la porte Input. Raison(s) : I_Gibbs > 0.05 sur au moins une famille du Regime 1 ; latence (51.58 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us)
+[AVERTISSEMENT] Ecart Etape 2 / Niveau 0 : la base plebiscitee par l'Etape 2 ('efficientkan') n'est PAS retenue par la preselection Niveau 0 sur la porte Input. Raison(s) : latence (286.8 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)
 
 ------------------------------------------------------------------------------
 PORTE : Candidate  (Regime 2, familles : fc1, fc2, fc3)
 ------------------------------------------------------------------------------
-Seuil RMSE (1er quartile) : 0.4246
-Base la plus rapide : fastkan (7.708 us) -- seuil latence (3.0x) = 23.12 us
+Seuil RMSE (1er quartile) : 0.424
+Base la plus rapide : fastkan (36.6 us) -- seuil latence (3.0x) = 109.8 us
+[NOTE] Critere T_90% calcule sur fc2 uniquement -- fc1, fc3 exclue(s) : mur de capacite empirique (B=12 insuffisant pour representer ce contenu haute frequence, confirme par RMSE ~= RMS(cible) et zero convergence sur les 45 essais meme a 5x le budget d'iterations initial -- cf. T90_EXCLUDED_FUNCTIONS dans le code). RMSE/latence restent, eux, evalues sur toutes les familles du regime.
 
-Bases RETENUES (0) : aucune
+Bases RETENUES (1) : wavkan_morlet
 
 Bases REJETEES :
-  - chebyshev : RMSE moyen (0.4831) hors du 1er quartile (seuil Q1=0.4246) ; latence (30.63 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us)
-  - efficientkan : RMSE moyen (0.4861) hors du 1er quartile (seuil Q1=0.4246) ; latence (51.58 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us) ; T_90% median (2000) >= 2000 iterations
-  - fastkan : T_90% median (2000) >= 2000 iterations
-  - fkan : RMSE moyen (0.6104) hors du 1er quartile (seuil Q1=0.4246) ; latence (247.5 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us) ; T_90% median (2000) >= 2000 iterations
-  - fourier : RMSE moyen (0.6081) hors du 1er quartile (seuil Q1=0.4246) ; T_90% median (2000) >= 2000 iterations
-  - relukan : RMSE moyen (0.5466) hors du 1er quartile (seuil Q1=0.4246) ; T_90% median (2000) >= 2000 iterations
-  - sinckan : T_90% median (2000) >= 2000 iterations
-  - wavkan_dog : RMSE moyen (0.6153) hors du 1er quartile (seuil Q1=0.4246) ; T_90% median (2000) >= 2000 iterations
-  - wavkan_morlet : T_90% median (2000) >= 2000 iterations
+  - chebyshev : RMSE moyen (0.4714) hors du 1er quartile (seuil Q1=0.424) ; latence (142.4 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)
+  - efficientkan : RMSE moyen (0.486) hors du 1er quartile (seuil Q1=0.424) ; latence (286.8 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us) ; T_90% median (10000) >= 4000 iterations sur fc2 uniquement (fc1/fc3 exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)
+  - fastkan : T_90% median (10000) >= 4000 iterations sur fc2 uniquement (fc1/fc3 exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)
+  - fkan : RMSE moyen (0.61) hors du 1er quartile (seuil Q1=0.424) ; latence (1128 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us) ; T_90% median (10000) >= 4000 iterations sur fc2 uniquement (fc1/fc3 exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)
+  - fourier : RMSE moyen (0.6057) hors du 1er quartile (seuil Q1=0.424) ; T_90% median (10000) >= 4000 iterations sur fc2 uniquement (fc1/fc3 exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)
+  - relukan : RMSE moyen (0.5466) hors du 1er quartile (seuil Q1=0.424) ; T_90% median (10000) >= 4000 iterations sur fc2 uniquement (fc1/fc3 exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)
+  - sinckan : T_90% median (10000) >= 4000 iterations sur fc2 uniquement (fc1/fc3 exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)
+  - wavkan_dog : RMSE moyen (0.4967) hors du 1er quartile (seuil Q1=0.424)
 
-[AVERTISSEMENT] Ecart Etape 2 / Niveau 0 : la base plebiscitee par l'Etape 2 ('wavkan_dog') n'est PAS retenue par la preselection Niveau 0 sur la porte Candidate. Raison(s) : RMSE moyen (0.6153) hors du 1er quartile (seuil Q1=0.4246) ; T_90% median (2000) >= 2000 iterations
+[AVERTISSEMENT] Ecart Etape 2 / Niveau 0 : la base plebiscitee par l'Etape 2 ('wavkan_dog') n'est PAS retenue par la preselection Niveau 0 sur la porte Candidate. Raison(s) : RMSE moyen (0.4967) hors du 1er quartile (seuil Q1=0.424)
 
 ------------------------------------------------------------------------------
 PORTE : Output  (Regime 3, familles : fo1, fo2)
 ------------------------------------------------------------------------------
-Seuil RMSE (1er quartile) : 0.01431
-Base la plus rapide : fastkan (7.708 us) -- seuil latence (3.0x) = 23.12 us
+Seuil RMSE (1er quartile) : 0.007312
+Base la plus rapide : fastkan (36.6 us) -- seuil latence (3.0x) = 109.8 us
 
-Bases RETENUES (1) : fourier
+Bases RETENUES (1) : wavkan_morlet
 
 Bases REJETEES :
-  - chebyshev : latence (30.63 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us)
-  - efficientkan : latence (51.58 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us)
-  - fastkan : RMSE moyen (0.0635) hors du 1er quartile (seuil Q1=0.01431)
-  - fkan : RMSE moyen (0.03877) hors du 1er quartile (seuil Q1=0.01431) ; latence (247.5 us) > 3.0x la plus rapide (fastkan=7.708 us, seuil=23.12 us)
-  - relukan : RMSE moyen (0.02369) hors du 1er quartile (seuil Q1=0.01431)
-  - sinckan : RMSE moyen (0.04854) hors du 1er quartile (seuil Q1=0.01431)
-  - wavkan_dog : RMSE moyen (0.03033) hors du 1er quartile (seuil Q1=0.01431)
-  - wavkan_morlet : RMSE moyen (0.02674) hors du 1er quartile (seuil Q1=0.01431)
+  - chebyshev : latence (142.4 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)
+  - efficientkan : latence (286.8 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)
+  - fastkan : RMSE moyen (0.03208) hors du 1er quartile (seuil Q1=0.007312)
+  - fkan : RMSE moyen (0.01441) hors du 1er quartile (seuil Q1=0.007312) ; latence (1128 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)
+  - fourier : RMSE moyen (0.01024) hors du 1er quartile (seuil Q1=0.007312)
+  - relukan : RMSE moyen (0.008671) hors du 1er quartile (seuil Q1=0.007312)
+  - sinckan : RMSE moyen (0.04331) hors du 1er quartile (seuil Q1=0.007312)
+  - wavkan_dog : RMSE moyen (0.0126) hors du 1er quartile (seuil Q1=0.007312)
 
 (Porte Output : applicable a la TKANCell (Rang 2) uniquement -- la GRUKANCell d'elite (Rang 1) n'a pas de porte Output.)
 

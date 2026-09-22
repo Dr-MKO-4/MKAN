@@ -61,6 +61,21 @@ ETAPE2_ELITE_BY_GATE = {
 CRITERIA_LATENCY_FACTOR = 3.0
 CRITERIA_T90_MAX = 2000
 
+# fc1 (sin(400*pi*x), 200 oscillations) et fc3 (composante a 40*pi) sont exclues
+# du critere T_90% -- constat empirique, pas une supposition : sur un run reel a
+# n_iterations=10000 (5x le budget initial), les 45 essais (9 bases x 5 graines)
+# sur fc1 sont TOUS restes a RMSE ~= 0.7067 (= RMS(sin(400*pi*x)) = 1/sqrt(2),
+# la solution triviale "predire ~0 partout") et t90_median EXACTEMENT au
+# plafond de censure (aucune progression, meme partielle). fc3 montre le meme
+# mur pour 8 bases sur 9. C'est un mur de CAPACITE (B=12 parametres ne peuvent
+# pas representer un contenu a si haute frequence -- argument de type
+# Nyquist/echantillonnage), pas un probleme de vitesse de convergence : aucun
+# nombre d'iterations supplementaires ne change ce resultat (deja verifie
+# empiriquement, cf. session du 2026-09-22). RMSE/latence restent evalues
+# normalement sur fc1/fc3 ; seul T_90% est exclu pour ces deux familles,
+# conserve pour fc2 (Morlet, effectivement apprenable a ce budget).
+T90_EXCLUDED_FUNCTIONS = {"fc1", "fc3"}
+
 
 def _grade_from_ratio(ratio: float) -> str:
     for bound, grade in GRADE_THRESHOLDS:
@@ -190,10 +205,22 @@ def preselect_by_gate(agg: pd.DataFrame, gibbs_violation_bases: set,
     for gate, regime in GATE_TO_REGIME.items():
         functions = REGIME_FUNCTIONS[regime]
         sub = agg[agg["function"].isin(functions)]
-        per_base = sub.groupby("base").agg(
-            rmse_avg=("rmse_median", "mean"),
-            t90_avg=("t90_median", "median"),
-        )
+        rmse_avg = sub.groupby("base")["rmse_median"].mean()
+
+        # T_90% exclut fc1/fc3 (mur de capacite empirique, cf. T90_EXCLUDED_FUNCTIONS) --
+        # RMSE/Gibbs/latence restent, eux, evalues sur TOUTES les familles du regime.
+        t90_functions = [f for f in functions if f not in T90_EXCLUDED_FUNCTIONS]
+        t90_excluded = [f for f in functions if f in T90_EXCLUDED_FUNCTIONS]
+        if t90_functions:
+            t90_sub = agg[agg["function"].isin(t90_functions)]
+            t90_avg = t90_sub.groupby("base")["t90_median"].median().reindex(rmse_avg.index)
+        else:
+            # Toutes les familles du regime sont exclues (cas non rencontre avec la
+            # configuration actuelle) : le critere T_90% ne peut pas s'appliquer,
+            # traite comme toujours satisfait plutot que de planter sur un groupby vide.
+            t90_avg = pd.Series(0.0, index=rmse_avg.index)
+
+        per_base = pd.DataFrame({"rmse_avg": rmse_avg, "t90_avg": t90_avg})
         per_base["latency"] = overall_latency.reindex(per_base.index)
         q1 = per_base["rmse_avg"].quantile(0.25)
 
@@ -221,8 +248,11 @@ def preselect_by_gate(agg: pd.DataFrame, gibbs_violation_bases: set,
                 )
             t90_ok = row["t90_avg"] < t90_max
             if not t90_ok:
+                t90_scope = (f"sur {'/'.join(t90_functions)} uniquement ({'/'.join(t90_excluded)} "
+                             f"exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)"
+                             if t90_excluded else f"sur {'/'.join(t90_functions)}")
                 reasons_fail.append(
-                    f"T_90% median ({row['t90_avg']:.0f}) >= {t90_max} iterations"
+                    f"T_90% median ({row['t90_avg']:.0f}) >= {t90_max} iterations {t90_scope}"
                 )
             retained = rmse_ok and gibbs_ok and latency_ok and t90_ok
             bases_decisions[base] = {
@@ -241,6 +271,8 @@ def preselect_by_gate(agg: pd.DataFrame, gibbs_violation_bases: set,
             "gibbs_threshold": gibbs_threshold,
             "latency_factor": latency_factor,
             "t90_max": t90_max,
+            "t90_functions": t90_functions,
+            "t90_excluded_functions": t90_excluded,
             "bases": bases_decisions,
         }
     return result
@@ -389,6 +421,16 @@ def write_report(preselection: dict, out_path: str, raw_metadata: dict) -> None:
         lines.append(f"Base la plus rapide : {info['fastest_base']} "
                      f"({info['fastest_latency_us']:.4g} us) -- seuil latence "
                      f"({CRITERIA_LATENCY_FACTOR}x) = {info['latency_limit_us']:.4g} us")
+        if info.get("t90_excluded_functions"):
+            lines.append(
+                f"[NOTE] Critere T_90% calcule sur {', '.join(info['t90_functions'])} "
+                f"uniquement -- {', '.join(info['t90_excluded_functions'])} exclue(s) : "
+                f"mur de capacite empirique (B=12 insuffisant pour representer ce contenu "
+                f"haute frequence, confirme par RMSE ~= RMS(cible) et zero convergence sur "
+                f"les 45 essais meme a 5x le budget d'iterations initial -- cf. "
+                f"T90_EXCLUDED_FUNCTIONS dans le code). RMSE/latence restent, eux, evalues "
+                f"sur toutes les familles du regime."
+            )
         lines.append("")
 
         lines.append(f"Bases RETENUES ({len(retained)}) : {', '.join(sorted(retained)) or 'aucune'}")

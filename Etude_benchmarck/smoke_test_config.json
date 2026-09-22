@@ -1,0 +1,25 @@
+{
+  "cell_type": "gru",
+  "regime": "brut",
+  "gate_bases": {
+    "reset": "relukan",
+    "update": "efficientkan",
+    "candidate": "wavkan"
+  },
+  "gate_kwargs": {
+    "reset": {"n_bases": 8},
+    "update": {"G": 3, "k": 4},
+    "candidate": {"wavelet": "dog", "n_wavelets": 3}
+  },
+  "hidden_size": 128,
+  "W": 5,
+  "epochs": 2,
+  "lr": 0.0001,
+  "batch_size": 32,
+  "lam": 0.0001,
+  "mu1": 0.1,
+  "mu2": 0.6989017708691363,
+  "seed": 1,
+  "max_accounts": 50,
+  "device": "cpu"
+}

@@ -70,7 +70,13 @@ def _retained_justification(gate: str, base: str, decision: dict, gate_info: dic
         parts.append(f"I_Gibbs <= {gate_info['gibbs_threshold']} sur les 3 familles du Regime 1")
     parts.append(f"latence ({decision['latency_us']:.4g} us) <= "
                  f"{gate_info['latency_factor']}x la plus rapide")
-    parts.append(f"T_90% median ({decision['t90_avg']:.0f}) < {gate_info['t90_max']} iterations")
+    t90_scope = ""
+    if gate_info.get("t90_excluded_functions"):
+        t90_scope = (f" (calcule sur {', '.join(gate_info['t90_functions'])} uniquement -- "
+                     f"{', '.join(gate_info['t90_excluded_functions'])} exclue(s) du critere "
+                     f"T_90% : mur de capacite empirique B=12, cf. T90_EXCLUDED_FUNCTIONS)")
+    parts.append(f"T_90% median ({decision['t90_avg']:.0f}) < {gate_info['t90_max']} "
+                 f"iterations{t90_scope}")
     justification = "Retenue : " + " ; ".join(parts) + "."
     elite = n0a.ETAPE2_ELITE_BY_GATE.get(gate)
     if elite == base:
@@ -265,6 +271,21 @@ def main():
                     "latency_factor": n0a.CRITERIA_LATENCY_FACTOR,
                     "t90_max": n0a.CRITERIA_T90_MAX,
                 },
+                "t90_excluded_functions": sorted(n0a.T90_EXCLUDED_FUNCTIONS),
+                "t90_exclusion_justification": (
+                    "fc1 (sin(400*pi*x), 200 oscillations) et fc3 (composante a 40*pi) "
+                    "sont exclues du critere T_90% pour toutes les portes : constat "
+                    "empirique (pas une supposition) -- a n_iterations=10000 (5x le budget "
+                    "initial de 2000), les 45 essais (9 bases x 5 graines) sur fc1 sont "
+                    "TOUS restes a RMSE ~= 0.7067 (= RMS(sin(400*pi*x)), solution triviale "
+                    "'predire ~0 partout') avec t90_median exactement au plafond de censure "
+                    "(zero progression, meme partielle). fc3 montre le meme mur pour 8 bases "
+                    "sur 9. C'est un mur de CAPACITE (B=12 parametres insuffisants pour "
+                    "representer un contenu a si haute frequence -- argument de type "
+                    "Nyquist/echantillonnage), pas un probleme de vitesse de convergence : "
+                    "aucun nombre d'iterations supplementaires ne change ce resultat. "
+                    "RMSE/Gibbs/latence restent evalues normalement sur fc1/fc3."
+                ),
             },
         },
         "presel_by_gate": presel_by_gate,

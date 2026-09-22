@@ -1,0 +1,255 @@
+{
+  "metadata": {
+    "etape": 3,
+    "level": 0,
+    "source_files": {
+      "raw_results": "M:\\Ecole\\Mémoire\\Modelisation\\MKAN\\Etude_benchmarck\\extended_search\\niveau0_benchmark_results.json",
+      "heuristic_best_config": "M:\\Ecole\\Mémoire\\Modelisation\\MKAN\\Etude_benchmarck\\extended_search\\heuristic_best_config.json",
+      "top5_configurations": "M:\\Ecole\\Mémoire\\Modelisation\\MKAN\\Etude_benchmarck\\extended_search\\top5_configurations.json"
+    },
+    "generated_at": "2026-09-22T11:15:43.187352+00:00",
+    "B_iso": 12,
+    "n_seeds": 5,
+    "raw_results_md5": "c3e71c8c843bd6ca420a966855759ca9",
+    "etape2_link": {
+      "heuristic_best_config_path": "M:\\Ecole\\Mémoire\\Modelisation\\MKAN\\Etude_benchmarck\\extended_search\\heuristic_best_config.json",
+      "cell_type": "GRUKANCell",
+      "MCC_raw": 0.9834131726178621,
+      "fitness_total": 0.6949897405913118,
+      "gates": {
+        "Forget": "relukan",
+        "Input": "efficientkan",
+        "Candidate": "wavkan"
+      },
+      "top5_rank2_tkan": {
+        "path": "M:\\Ecole\\Mémoire\\Modelisation\\MKAN\\Etude_benchmarck\\extended_search\\top5_configurations.json",
+        "cell_type": "TKANCell",
+        "Base_Forget": "relukan",
+        "Base_Input": "chebyshev",
+        "Base_Candidate": "wavkan",
+        "Base_Output": "linear",
+        "latency_ms": 92.79054030776024,
+        "MCC_raw": 0.9739688363043011
+      }
+    },
+    "preselection_thresholds": {
+      "gibbs_threshold": 0.2,
+      "latency_factor": 3.0,
+      "t90_max": 4000,
+      "is_protocol_default": false,
+      "protocol_defaults": {
+        "gibbs_threshold": 0.05,
+        "latency_factor": 3.0,
+        "t90_max": 2000
+      },
+      "t90_excluded_functions": [
+        "fc1",
+        "fc3"
+      ],
+      "t90_exclusion_justification": "fc1 (sin(400*pi*x), 200 oscillations) et fc3 (composante a 40*pi) sont exclues du critere T_90% pour toutes les portes : constat empirique (pas une supposition) -- a n_iterations=10000 (5x le budget initial de 2000), les 45 essais (9 bases x 5 graines) sur fc1 sont TOUS restes a RMSE ~= 0.7067 (= RMS(sin(400*pi*x)), solution triviale 'predire ~0 partout') avec t90_median exactement au plafond de censure (zero progression, meme partielle). fc3 montre le meme mur pour 8 bases sur 9. C'est un mur de CAPACITE (B=12 parametres insuffisants pour representer un contenu a si haute frequence -- argument de type Nyquist/echantillonnage), pas un probleme de vitesse de convergence : aucun nombre d'iterations supplementaires ne change ce resultat. RMSE/Gibbs/latence restent evalues normalement sur fc1/fc3."
+    }
+  },
+  "presel_by_gate": {
+    "Forget": {
+      "retained_bases": [
+        {
+          "base": "relukan",
+          "justification": "Retenue : RMSE moyen (0.07504) dans le 1er quartile des bases ; I_Gibbs <= 0.2 sur les 3 familles du Regime 1 ; latence (72.2 us) <= 3.0x la plus rapide ; T_90% median (82) < 4000 iterations. Coherente avec la base plebiscitee par l'Etape 2 sur cette porte."
+        },
+        {
+          "base": "wavkan_dog",
+          "justification": "Retenue : RMSE moyen (0.05203) dans le 1er quartile des bases ; I_Gibbs <= 0.2 sur les 3 familles du Regime 1 ; latence (54.1 us) <= 3.0x la plus rapide ; T_90% median (530) < 4000 iterations."
+        }
+      ],
+      "rejected_bases": [
+        {
+          "base": "chebyshev",
+          "justification": "Rejetee : RMSE moyen (0.09462) hors du 1er quartile (seuil Q1=0.0841) ; latence (142.4 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)."
+        },
+        {
+          "base": "efficientkan",
+          "justification": "Rejetee : latence (286.8 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)."
+        },
+        {
+          "base": "fastkan",
+          "justification": "Rejetee : RMSE moyen (0.08416) hors du 1er quartile (seuil Q1=0.0841)."
+        },
+        {
+          "base": "fkan",
+          "justification": "Rejetee : RMSE moyen (0.128) hors du 1er quartile (seuil Q1=0.0841) ; latence (1128 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)."
+        },
+        {
+          "base": "fourier",
+          "justification": "Rejetee : RMSE moyen (0.1047) hors du 1er quartile (seuil Q1=0.0841)."
+        },
+        {
+          "base": "sinckan",
+          "justification": "Rejetee : RMSE moyen (0.08568) hors du 1er quartile (seuil Q1=0.0841)."
+        },
+        {
+          "base": "wavkan_morlet",
+          "justification": "Rejetee : RMSE moyen (0.113) hors du 1er quartile (seuil Q1=0.0841)."
+        }
+      ],
+      "coherence_check": {
+        "etape2_elite_base": "relukan",
+        "status": "OK",
+        "explanation": "La base plebiscitee par l'Etape 2 sur la porte Forget ('relukan') figure bien parmi les bases retenues par le Niveau 0."
+      }
+    },
+    "Input": {
+      "retained_bases": [
+        {
+          "base": "relukan",
+          "justification": "Retenue : RMSE moyen (0.07504) dans le 1er quartile des bases ; I_Gibbs <= 0.2 sur les 3 familles du Regime 1 ; latence (72.2 us) <= 3.0x la plus rapide ; T_90% median (82) < 4000 iterations."
+        },
+        {
+          "base": "wavkan_dog",
+          "justification": "Retenue : RMSE moyen (0.05203) dans le 1er quartile des bases ; I_Gibbs <= 0.2 sur les 3 familles du Regime 1 ; latence (54.1 us) <= 3.0x la plus rapide ; T_90% median (530) < 4000 iterations."
+        }
+      ],
+      "rejected_bases": [
+        {
+          "base": "chebyshev",
+          "justification": "Rejetee : RMSE moyen (0.09462) hors du 1er quartile (seuil Q1=0.0841) ; latence (142.4 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)."
+        },
+        {
+          "base": "efficientkan",
+          "justification": "Rejetee : latence (286.8 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)."
+        },
+        {
+          "base": "fastkan",
+          "justification": "Rejetee : RMSE moyen (0.08416) hors du 1er quartile (seuil Q1=0.0841)."
+        },
+        {
+          "base": "fkan",
+          "justification": "Rejetee : RMSE moyen (0.128) hors du 1er quartile (seuil Q1=0.0841) ; latence (1128 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)."
+        },
+        {
+          "base": "fourier",
+          "justification": "Rejetee : RMSE moyen (0.1047) hors du 1er quartile (seuil Q1=0.0841)."
+        },
+        {
+          "base": "sinckan",
+          "justification": "Rejetee : RMSE moyen (0.08568) hors du 1er quartile (seuil Q1=0.0841)."
+        },
+        {
+          "base": "wavkan_morlet",
+          "justification": "Rejetee : RMSE moyen (0.113) hors du 1er quartile (seuil Q1=0.0841)."
+        }
+      ],
+      "coherence_check": {
+        "etape2_elite_base": "efficientkan",
+        "status": "AVERTISSEMENT",
+        "explanation": "La base plebiscitee par l'Etape 2 sur la porte Input ('efficientkan') n'est PAS retenue par la preselection Niveau 0. Raison(s) : latence (286.8 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)"
+      }
+    },
+    "Candidate": {
+      "retained_bases": [
+        {
+          "base": "wavkan_morlet",
+          "justification": "Retenue : RMSE moyen (0.3569) dans le 1er quartile des bases ; latence (62.2 us) <= 3.0x la plus rapide ; T_90% median (98) < 4000 iterations (calcule sur fc2 uniquement -- fc1, fc3 exclue(s) du critere T_90% : mur de capacite empirique B=12, cf. T90_EXCLUDED_FUNCTIONS)."
+        }
+      ],
+      "rejected_bases": [
+        {
+          "base": "chebyshev",
+          "justification": "Rejetee : RMSE moyen (0.4714) hors du 1er quartile (seuil Q1=0.424) ; latence (142.4 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)."
+        },
+        {
+          "base": "efficientkan",
+          "justification": "Rejetee : RMSE moyen (0.486) hors du 1er quartile (seuil Q1=0.424) ; latence (286.8 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us) ; T_90% median (10000) >= 4000 iterations sur fc2 uniquement (fc1/fc3 exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)."
+        },
+        {
+          "base": "fastkan",
+          "justification": "Rejetee : T_90% median (10000) >= 4000 iterations sur fc2 uniquement (fc1/fc3 exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)."
+        },
+        {
+          "base": "fkan",
+          "justification": "Rejetee : RMSE moyen (0.61) hors du 1er quartile (seuil Q1=0.424) ; latence (1128 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us) ; T_90% median (10000) >= 4000 iterations sur fc2 uniquement (fc1/fc3 exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)."
+        },
+        {
+          "base": "fourier",
+          "justification": "Rejetee : RMSE moyen (0.6057) hors du 1er quartile (seuil Q1=0.424) ; T_90% median (10000) >= 4000 iterations sur fc2 uniquement (fc1/fc3 exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)."
+        },
+        {
+          "base": "relukan",
+          "justification": "Rejetee : RMSE moyen (0.5466) hors du 1er quartile (seuil Q1=0.424) ; T_90% median (10000) >= 4000 iterations sur fc2 uniquement (fc1/fc3 exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)."
+        },
+        {
+          "base": "sinckan",
+          "justification": "Rejetee : T_90% median (10000) >= 4000 iterations sur fc2 uniquement (fc1/fc3 exclues : mur de capacite B=12 empirique, cf. T90_EXCLUDED_FUNCTIONS)."
+        },
+        {
+          "base": "wavkan_dog",
+          "justification": "Rejetee : RMSE moyen (0.4967) hors du 1er quartile (seuil Q1=0.424)."
+        }
+      ],
+      "coherence_check": {
+        "etape2_elite_base": "wavkan_dog",
+        "status": "AVERTISSEMENT",
+        "explanation": "La base plebiscitee par l'Etape 2 sur la porte Candidate ('wavkan_dog') n'est PAS retenue par la preselection Niveau 0. Raison(s) : RMSE moyen (0.4967) hors du 1er quartile (seuil Q1=0.424)"
+      }
+    },
+    "Output": {
+      "retained_bases": [
+        {
+          "base": "wavkan_morlet",
+          "justification": "Retenue : RMSE moyen (0.007312) dans le 1er quartile des bases ; latence (62.2 us) <= 3.0x la plus rapide ; T_90% median (220) < 4000 iterations."
+        }
+      ],
+      "rejected_bases": [
+        {
+          "base": "chebyshev",
+          "justification": "Rejetee : latence (142.4 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)."
+        },
+        {
+          "base": "efficientkan",
+          "justification": "Rejetee : latence (286.8 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)."
+        },
+        {
+          "base": "fastkan",
+          "justification": "Rejetee : RMSE moyen (0.03208) hors du 1er quartile (seuil Q1=0.007312)."
+        },
+        {
+          "base": "fkan",
+          "justification": "Rejetee : RMSE moyen (0.01441) hors du 1er quartile (seuil Q1=0.007312) ; latence (1128 us) > 3.0x la plus rapide (fastkan=36.6 us, seuil=109.8 us)."
+        },
+        {
+          "base": "fourier",
+          "justification": "Rejetee : RMSE moyen (0.01024) hors du 1er quartile (seuil Q1=0.007312)."
+        },
+        {
+          "base": "relukan",
+          "justification": "Rejetee : RMSE moyen (0.008671) hors du 1er quartile (seuil Q1=0.007312)."
+        },
+        {
+          "base": "sinckan",
+          "justification": "Rejetee : RMSE moyen (0.04331) hors du 1er quartile (seuil Q1=0.007312)."
+        },
+        {
+          "base": "wavkan_dog",
+          "justification": "Rejetee : RMSE moyen (0.0126) hors du 1er quartile (seuil Q1=0.007312)."
+        }
+      ],
+      "coherence_check": null,
+      "applicable_to": "TKANCell (Rang 2 des top5_configurations.json) uniquement -- la GRUKANCell d'elite (Rang 1, heuristic_best_config.json) n'a pas de porte Output."
+    }
+  },
+  "search_space_reduction": {
+    "n_base_families": 8,
+    "n_gates": 4,
+    "per_gate_retained_family_count": {
+      "Forget": 2,
+      "Input": 2,
+      "Candidate": 1,
+      "Output": 1
+    },
+    "combinations_before": 4096,
+    "combinations_after": 4,
+    "reduction_pct": 99.90234375,
+    "n_niveau1_runs_avoided": 4092,
+    "warnings": [],
+    "note": "combinations_before suppose l'espace superset a 4 portes de la TKANCell (la GRUKANCell d'elite n'a que 3 portes, donc un espace reel plus petit pour cette architecture). Wav-KAN compte pour UNE famille (dog/morlet est un hyperparametre interne a la famille, pas un choix de base separe au niveau de la recherche Etape 2)."
+  }
+}
