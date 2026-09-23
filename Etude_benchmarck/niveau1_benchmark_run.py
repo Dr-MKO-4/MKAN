@@ -1,10 +1,23 @@
 """
-niveau1_benchmark_run.py -- Etape 4 (Niveau 1) : plan de croisement factoriel
-integral des architectures heterogenes MKAN sur MoMTSim.
+niveau1_benchmark_run.py -- Etape 4 (Niveau 1) : plan de croisement des
+architectures heterogenes MKAN sur MoMTSim.
 
-Assemble et evalue 360 runs recurrents complets = 36 architectures heterogenes
-(candidats Niveau 0 UNION Elite Etape 2, verrouilles par la discussion) x 2
-regimes d'entree (brut/traite) x 5 graines, puis identifie la configuration
+Deux strategies (--strategy), meme entrainement/metriques/qualite par run :
+  - raw_first (DEFAUT) : phase 1 sur le regime raw seul (36 architectures x
+    5 graines = 180 runs), puis extension du Top --top_n_engineered (defaut
+    3) vers engineered (+15 runs pour N=3) = ~195 runs. Decision prise en
+    cours de session : le plan factoriel integral (360 runs) s'est revele
+    beaucoup trop long en pratique (52% de la phase d'entrainement en 18h de
+    calcul reel) ; cette reduction ne touche NI epochs NI le nombre de
+    graines NI la taille du dataset (aucune perte de qualite par run), et
+    s'appuie sur un resultat DEJA observe empiriquement en Etape 2 (raw >
+    engineered, MCC 0.9834 vs 0.9559 pour la config Rang 3 engineered).
+  - full : plan factoriel integral, 36 architectures heterogenes x 2 regimes
+    d'entree (brut/traite) x 5 graines = 360 runs. Aucun angle mort, mais
+    nettement plus long -- a reserver a une machine dediee sur plusieurs jours.
+
+Assemble les architectures heterogenes candidates (candidats Niveau 0 UNION
+Elite Etape 2, verrouilles par la discussion), puis identifie la configuration
 heterogene optimale et la compare au modele MKAN uniforme de reference
 (base "hybrid" sur toutes les portes).
 
@@ -171,19 +184,27 @@ def build_architecture_grid() -> list:
     return archs
 
 
-def build_full_grid(seeds: list) -> list:
-    archs = build_architecture_grid()
+def build_regime_grid(archs: list, regime_label: str, seeds: list) -> list:
+    regime_niveau1 = REGIME_MAP[regime_label]
     grid = []
     for arch in archs:
-        for regime_label, regime_niveau1 in REGIME_MAP.items():
-            for seed in seeds:
-                grid.append({
-                    "cell_type": arch["cell_type"],
-                    "base_by_gate": arch["base_by_gate"],
-                    "regime": regime_label,
-                    "regime_niveau1": regime_niveau1,
-                    "seed": seed,
-                })
+        for seed in seeds:
+            grid.append({
+                "cell_type": arch["cell_type"],
+                "base_by_gate": arch["base_by_gate"],
+                "regime": regime_label,
+                "regime_niveau1": regime_niveau1,
+                "seed": seed,
+            })
+    return grid
+
+
+def build_full_grid(seeds: list) -> list:
+    """Plan factoriel integral (360 runs) -- conserve pour --strategy full."""
+    archs = build_architecture_grid()
+    grid = []
+    for regime_label in REGIME_MAP:
+        grid.extend(build_regime_grid(archs, regime_label, seeds))
     return grid
 
 
@@ -317,6 +338,18 @@ def main():
                               "entraines a 10 epoques sur l'ensemble complet de validation. "
                               "Aucune valeur '30 epoques' n'existe dans le pipeline reel.")
     parser.add_argument("--n_seeds", type=int, default=5)
+    parser.add_argument("--strategy", type=str, default="raw_first",
+                         choices=["raw_first", "full"],
+                         help="raw_first (defaut) : phase 1 sur raw seul (36 architectures "
+                              "x n_seeds), puis extension du Top --top_n_engineered vers "
+                              "engineered -- reduit le nombre de runs sans toucher epochs/"
+                              "graines/dataset (aucune perte de qualite par run), appuye sur "
+                              "le resultat deja observe raw > engineered (Etape 2, MCC 0.9834 "
+                              "vs 0.9559). 'full' : plan factoriel integral (36 x 2 x n_seeds), "
+                              "aucun angle mort mais nettement plus long.")
+    parser.add_argument("--top_n_engineered", type=int, default=3,
+                         help="Nombre d'architectures (meilleure fitness sur raw) etendues "
+                              "au regime engineered en strategie raw_first.")
     parser.add_argument("--device", type=str, default="auto",
                          choices=["auto", "cpu", "mps", "cuda"])
     parser.add_argument("--enable_latency_penalty", action="store_true", default=True)
@@ -356,9 +389,7 @@ def main():
               f"differente ignoree(s).")
 
     seeds = list(range(1, args.n_seeds + 1))
-    grid = build_full_grid(seeds)
-    for point in grid:
-        point["key"] = _point_key(point)
+    archs = build_architecture_grid()
 
     # Cache (regime_niveau1, W) -> donnees pre-fenetrees. Seules 4 combinaisons
     # distinctes existent dans le plan (brut/W=5, brut/W=10, traite/W=5,
@@ -398,20 +429,53 @@ def main():
             "metrics": metrics,
         }
 
-    remaining = [p for p in grid if p["key"] not in completed]
-    results = list(completed.values())
+    def _run_grid(points: list, desc: str) -> list:
+        for p in points:
+            p["key"] = _point_key(p)
+        remaining = [p for p in points if p["key"] not in completed]
+        out = [completed[p["key"]] for p in points if p["key"] in completed]
+        pbar = tqdm(remaining, desc=desc, unit="run")
+        for point in pbar:
+            pbar.set_postfix_str(f"{point['cell_type']}/{point['regime']}/seed{point['seed']}")
+            result = _run_point(point)
+            _append_jsonl(progress_path, {
+                "run_signature": run_signature, "key": point["key"], "result": result,
+            })
+            completed[point["key"]] = result
+            out.append(result)
+        return out
 
-    pbar = tqdm(remaining, desc="Etape 4 -- Niveau 1 (360 runs)", unit="run")
-    for point in pbar:
-        pbar.set_postfix_str(f"{point['cell_type']}/{point['regime']}/seed{point['seed']}")
-        result = _run_point(point)
-        _append_jsonl(progress_path, {
-            "run_signature": run_signature, "key": point["key"], "result": result,
-        })
-        results.append(result)
+    from collections import defaultdict
+
+    if args.strategy == "full":
+        results = _run_grid(build_full_grid(seeds), "Etape 4 -- Niveau 1 (360 runs, factoriel integral)")
+    else:
+        # raw_first : phase 1 sur raw uniquement (180 runs), puis extension du
+        # Top N (defaut 3) vers engineered (+15 runs pour N=3) -- reduit le
+        # nombre total de runs SANS toucher epochs/graines/taille du dataset
+        # (aucune perte de qualite par run), appuye sur le resultat DEJA
+        # observe empiriquement en Etape 2 (raw > engineered, MCC 0.9834 vs
+        # 0.9559) -- decision prise en cours de session apres mesure reelle
+        # du temps d'execution (365 runs factoriels trop longs en pratique).
+        raw_results = _run_grid(build_regime_grid(archs, "raw", seeds),
+                                 "Etape 4 phase 1/2 -- raw (180 runs)")
+        raw_by_arch = defaultdict(list)
+        for r in raw_results:
+            arch_key = tuple(sorted(r["base_by_gate"].items()))
+            raw_by_arch[(r["cell_type"], arch_key)].append(r["metrics"]["fitness_total"])
+        raw_fitness = {k: float(np.mean(v)) for k, v in raw_by_arch.items()}
+        top_archs_keys = sorted(raw_fitness, key=raw_fitness.get, reverse=True)[:args.top_n_engineered]
+        top_archs = [{"cell_type": ct, "base_by_gate": dict(bg)} for ct, bg in top_archs_keys]
+        print(f"[raw_first] Top {len(top_archs)} architectures (fitness raw) "
+              f"etendues a engineered : "
+              + "; ".join(f"{ct}/{dict(bg)}={raw_fitness[(ct, bg)]:.4f}"
+                          for ct, bg in top_archs_keys))
+        eng_results = _run_grid(build_regime_grid(top_archs, "engineered", seeds),
+                                 f"Etape 4 phase 2/2 -- engineered top {len(top_archs)} "
+                                 f"({len(top_archs) * len(seeds)} runs)")
+        results = raw_results + eng_results
 
     # ── Meilleure architecture heterogene (fitness moyenne sur les 5 graines) ──
-    from collections import defaultdict
     by_arch = defaultdict(list)
     for r in results:
         arch_key = (r["cell_type"], r["regime"],
@@ -467,7 +531,10 @@ def main():
     with open(results_path, "w", encoding="utf-8") as f:
         json.dump({
             "metadata": {"epochs": args.epochs, "n_seeds": len(seeds),
-                         "device": device.type,
+                         "device": device.type, "strategy": args.strategy,
+                         "top_n_engineered": (args.top_n_engineered
+                                               if args.strategy == "raw_first" else None),
+                         "n_runs_total": len(results),
                          "timestamp": datetime.now(timezone.utc).isoformat()},
             "results": results,
             "baseline_results": baseline_results,
