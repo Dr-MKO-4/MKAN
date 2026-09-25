@@ -176,14 +176,14 @@ class HierarchicalSensitivityAnalyzer:
                                Note (section 15, sérialisation multiprocessing) :
                                les évaluations parallèles s'exécutent TOUJOURS
                                sur CPU dans les workers, indépendamment de ce
-                               paramètre — un contexte CUDA/DirectML ne se
+                               paramètre  un contexte CUDA/DirectML ne se
                                partage pas entre processus, et le protocole de
                                sensibilité (5 époques, 10k fenêtres) reste
                                rapide sur CPU. device n'est conservé que pour
                                un usage séquentiel (max_workers=1) explicite.
         n_epochs_eval, n_windows_eval : protocole RÉDUIT de la sensibilité
                                (distinct du protocole final 50k/10 époques
-                               de la recherche heuristique — jamais confondus).
+                               de la recherche heuristique  jamais confondus).
         max_workers          : ProcessPoolExecutor (défaut 2, configurable).
     """
 
@@ -210,7 +210,7 @@ class HierarchicalSensitivityAnalyzer:
         self.seed = seed
         # Attribut d'instance (et non un monkeypatch de module) : `self` est
         # sérialisé vers les workers ProcessPoolExecutor (_init_worker), donc
-        # ce réglage s'applique aussi bien en séquentiel qu'en parallèle —
+        # ce réglage s'applique aussi bien en séquentiel qu'en parallèle 
         # contrairement à un patch de fonction globale, invisible des process
         # enfants qui ré-importent le module frais.
         self.enable_latency_penalty = enable_latency_penalty
@@ -304,7 +304,7 @@ class HierarchicalSensitivityAnalyzer:
     def _read_log_records(self) -> list:
         path = self._log_path
         if not os.path.exists(path):
-            self._fallback_log.append(f"extended_search_log.jsonl introuvable ({path}) — "
+            self._fallback_log.append(f"extended_search_log.jsonl introuvable ({path})  "
                                       "repli théorique pour toutes les variables.")
             return []
         records = []
@@ -344,7 +344,7 @@ class HierarchicalSensitivityAnalyzer:
         Ordre : fréquence décroissante dans le top-20% du journal si dispo
         (>= 5 observations), sinon ordre canonique de l'espace de recherche
         (loggé, section 2 : « jamais un encodage arbitraire différent entre
-        deux exécutions » — l'ordre canonique est fixe et déterministe).
+        deux exécutions »  l'ordre canonique est fixe et déterministe).
         """
         records = self._read_log_records()
         valid = [r for r in records if isinstance(r.get("fitness"), (int, float))]
@@ -482,7 +482,7 @@ class HierarchicalSensitivityAnalyzer:
             if math.isnan(fitness) or math.isinf(fitness):
                 raise ValueError("fitness NaN/Inf")
             return float(fitness)
-        except Exception as exc:   # noqa: BLE001 — section 17 : jamais interrompre l'analyse
+        except Exception as exc:   # noqa: BLE001  section 17 : jamais interrompre l'analyse
             self._log_evaluation_error(evaluation_id, exc)
             return -1.0
 
@@ -503,7 +503,7 @@ class HierarchicalSensitivityAnalyzer:
         Évalue chaque ligne de X (tirages [0,1]^d), avec reprise automatique
         depuis sobol_evaluations.npy (section 16) et checkpoint tous les
         `checkpoint_every` évaluations. Barre de progression tqdm dans les deux
-        cas (séquentiel ET ProcessPoolExecutor) — un Sobol à N=1024/d~48 lance
+        cas (séquentiel ET ProcessPoolExecutor)  un Sobol à N=1024/d~48 lance
         potentiellement des dizaines de milliers d'entraînements ; sans retour
         visuel, rien ne distingue un run normal (juste long) d'un run bloqué.
         """
@@ -525,7 +525,7 @@ class HierarchicalSensitivityAnalyzer:
         pbar = tqdm(total=len(pending), desc=f"  {desc}", unit="éval", initial=0,
                    bar_format="{l_bar}{bar:28}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}{postfix}]")
         if n_already_done:
-            pbar.write(f"  ({n_already_done} évaluation(s) déjà disponibles depuis un run précédent — reprises)")
+            pbar.write(f"  ({n_already_done} évaluation(s) déjà disponibles depuis un run précédent  reprises)")
 
         if self.max_workers > 1:
             with ProcessPoolExecutor(max_workers=self.max_workers,
@@ -649,7 +649,7 @@ class HierarchicalSensitivityAnalyzer:
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
         except ImportError:
-            print("  [avertissement] matplotlib indisponible — morris_plot.png non généré.")
+            print("  [avertissement] matplotlib indisponible  morris_plot.png non généré.")
             return
         mu_star = [r["mu_star"] for r in results]
         sigma = [r["sigma"] for r in results]
@@ -660,7 +660,7 @@ class HierarchicalSensitivityAnalyzer:
                 ax.annotate(r["param_name"], (r["mu_star"], r["sigma"]), fontsize=6)
         ax.set_xlabel("mu*  (importance moyenne)")
         ax.set_ylabel("sigma  (non-linéarité / interaction)")
-        ax.set_title("Criblage de Morris — espace conditionnel MKAN (Étape 2)")
+        ax.set_title("Criblage de Morris  espace conditionnel MKAN (Étape 2)")
         fig.tight_layout()
         fig.savefig(os.path.join(self.scratch_dir, "morris_plot.png"), dpi=150)
         plt.close(fig)
@@ -677,7 +677,7 @@ class HierarchicalSensitivityAnalyzer:
         # SALib 1.5.2 : SALib.sample.saltelli est dépréciée au profit de
         # SALib.sample.sobol (API vérifiée par inspect.signature avant
         # implémentation, section 10 : « avant d'utiliser une API SALib,
-        # inspecter la version installée » — saltelli.sample() n'a d'ailleurs
+        # inspecter la version installée »  saltelli.sample() n'a d'ailleurs
         # pas de paramètre `seed`, contrairement à sobol.sample()).
         from SALib.sample import sobol as sobol_sample
         from SALib.analyze import sobol as sobol_analyze
@@ -740,7 +740,7 @@ class HierarchicalSensitivityAnalyzer:
         """
         Analyse de sensibilité conduite séparément pour chaque base réellement
         candidate de `gate` (GATE_CANDIDATES[gate], déterminé depuis
-        extended_heuristic_search — jamais une liste théorique en dur).
+        extended_heuristic_search  jamais une liste théorique en dur).
         Les autres variables (theta_opt, autres portes) sont fixées à la
         configuration de référence (self.best_config si disponible, sinon
         valeurs médianes de la grille théorique).
@@ -771,7 +771,7 @@ class HierarchicalSensitivityAnalyzer:
                 Y[row_i] = self._evaluate_individual(individual, evaluation_id=1_000_000 + row_i)
 
             if np.all(np.isnan(Y)) or len(Y) < len(local_names) + 1:
-                intragroup[base] = {"status": "évaluations insuffisantes — groupe non analysé",
+                intragroup[base] = {"status": "évaluations insuffisantes  groupe non analysé",
                                     "base_context": base, "gate": gate}
                 continue
 
@@ -857,7 +857,7 @@ class HierarchicalSensitivityAnalyzer:
         redondants  = [r for r in rows if r["status"] == "Redondant"]
         interactifs = sorted([r for r in rows if r["status"] == "Interactif"], key=lambda r: -r["ratio"])
 
-        lines = ["# Rapport de décision — Analyse de sensibilité hiérarchique (Étape 2)", ""]
+        lines = ["# Rapport de décision  Analyse de sensibilité hiérarchique (Étape 2)", ""]
         lines.append(f"SALib version : {sobol_payload['metadata']['salib_version']} | "
                     f"N Sobol = {sobol_payload['metadata']['N']} | "
                     f"d_effective = {sobol_payload['metadata']['d_effective']}")
@@ -877,7 +877,7 @@ class HierarchicalSensitivityAnalyzer:
             lines.append(f"| {r['param_name']} | {r['S_i']:.4f} | {r['S_Ti']:.4f} | "
                         f"{r['ratio']:.2f} | {interp} |")
         if not critiques:
-            lines.append("| — aucun — | | | | |")
+            lines.append("|  aucun  | | | | |")
         lines.append("")
 
         lines.append("## 2. Hyperparamètres redondants (S_Ti < 0.02, faible importance Morris)\n")
@@ -889,7 +889,7 @@ class HierarchicalSensitivityAnalyzer:
                         f"S_Ti et effet élémentaire de Morris (mu*, sigma) tous deux "
                         f"sous le seuil 0.05·σ(fitness) |")
         if not redondants:
-            lines.append("| — aucun — | | | |")
+            lines.append("|  aucun  | | | |")
         lines.append("")
 
         lines.append("## 3. Hyperparamètres interactifs (S_Ti/S_i > 2)\n")
@@ -905,7 +905,7 @@ class HierarchicalSensitivityAnalyzer:
                         "pas une paire d'hyperparamètres identifiée. Aucune paire spécifique "
                         "n'est affirmée sans indices d'ordre 2 (S2).")
         else:
-            lines.append("| — aucun — | | | | |")
+            lines.append("|  aucun  | | | | |")
         lines.append("")
 
         lines.append("## 4. Configuration finale retenue\n")
@@ -1022,7 +1022,7 @@ class HierarchicalSensitivityAnalyzer:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Support ProcessPoolExecutor (section 15) — fonctions au niveau module,
+# Support ProcessPoolExecutor (section 15)  fonctions au niveau module,
 # picklables ; l'initializer place l'analyzer/les DataFrames une seule fois
 # par worker plutôt que de les sérialiser à chaque tâche.
 # ══════════════════════════════════════════════════════════════════════════

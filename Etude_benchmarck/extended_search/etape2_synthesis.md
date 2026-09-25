@@ -1,4 +1,4 @@
-# Résultats de l'Étape 2 — Recherche Heuristique Étendue et Analyse de Sensibilité
+# Résultats de l'Étape 2  Recherche Heuristique Étendue et Analyse de Sensibilité
 
 ## 1. Configuration optimale retenue
 
@@ -11,7 +11,7 @@
 | Forget | relukan | {"Grid_G": 8} |
 | Input | efficientkan | {"Grid_G": 3, "Spline_Degree_k": 4} |
 | Candidate | wavkan | {"Mother_Wavelet": "dog", "M_wavelets": 3} |
-| Output | N/A (absente — GRUKANCell) | |
+| Output | N/A (absente  GRUKANCell) | |
 
 MCC_raw=0.9834 | MCC_clipped=0.9834 | PR_AUC=0.9994 | Brier=0.0048 | R2_symbolic=0.5250 | latency_ms=853.5887 | fitness_total=0.6950
 
@@ -41,7 +41,7 @@ Aucun hyperparamètre interactif identifié (ou sensitivity_rankings.json absent
 
 | Cellule | hidden_size | hidden_size_gru_adjusted | fitness (best) | MCC (best) |
 |---|---|---|---|---|
-| TKANCell | 32 | — | 0.6878 | 0.9740 |
+| TKANCell | 32 |  | 0.6878 | 0.9740 |
 | GRUKANCell | 128 | 170 | 0.6950 | 0.9834 |
 
 Δ fitness (GRUKANCell - TKANCell) = 0.0072

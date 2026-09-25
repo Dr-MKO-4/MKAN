@@ -5,7 +5,7 @@ sensitivity_analysis.py.
 
 ─── Constat d'inventaire (première opération, section 2) ───────────────────
 Sur cet environnement Windows, /workspace/scratch/ n'existe pas (convention
-de conteneur cloud absente localement — même constat que dans
+de conteneur cloud absente localement  même constat que dans
 extended_heuristic_search.py et sensitivity_analysis.py, qui replient alors
 respectivement sur MKAN/checkpoints/extended_search/ et
 MKAN/checkpoints/sensitivity/). À la date d'écriture de ce module, AUCUNE
@@ -13,12 +13,12 @@ recherche Étape 2 réelle n'a encore été exécutée dans ce dépôt : ni
 /workspace/scratch/ ni MKAN/checkpoints/{extended_search,sensitivity}/ ne
 contiennent de extended_search_log.jsonl, heuristic_best_config.json,
 sensitivity_rankings.json, morris_results.json, sobol_evaluations.npy ou
-sensitivity_report.md — seuls des artefacts de l'Étape 1 (audit_report.json,
+sensitivity_report.md  seuls des artefacts de l'Étape 1 (audit_report.json,
 mkan_final.pt, *.html) existent dans MKAN/checkpoints/. Step2ResultsExporter
 est donc conçu, comme l'exige la spécification, pour fonctionner sur un
 répertoire source PARTIEL ou VIDE : load_all_results() ne lève jamais
 d'exception fatale sur un fichier manquant, et validate_outputs() rapporte
-explicitement les sorties impossibles à produire faute de source — aucun
+explicitement les sorties impossibles à produire faute de source  aucun
 résultat scientifique n'est fabriqué par ce module.
 
 ─── Compatibilité de formats (section 19) ───────────────────────────────────
@@ -28,7 +28,7 @@ entre les trois sources possibles :
     ExtendedHeuristicSearch (Cell_Type, Input_Regime, gates={gate:{"Base":…}}).
   - heuristic_best_config.json : theta_opt + theta_struct.gates={gate:{"base":…,
     "hyperparams":{…}}} (format scientifique canonique de l'Étape 2, prioritaire
-    pour la compatibilité avec les étapes suivantes — jamais réécrit avec une
+    pour la compatibilité avec les étapes suivantes  jamais réécrit avec une
     structure différente par ce module).
   - top5_configs.json / représentation aplatie (sensitivity_analysis.
     _flatten_individual) : clés "Base_<Gate>" et "<Gate>::<Base>::<Param>".
@@ -53,7 +53,7 @@ from extended_heuristic_search import hidden_size_gru_adjusted, GATE_NAMES_TKAN 
 
 logger = logging.getLogger("results_export")
 
-# ── Palette accessible (section 10) — ne pas en ajouter d'autres sans nécessité ──
+# ── Palette accessible (section 10)  ne pas en ajouter d'autres sans nécessité ──
 PALETTE = {
     "Critique":   (0.85, 0.33, 0.10),
     "Interactif": (0.94, 0.66, 0.13),
@@ -70,7 +70,7 @@ TABLE_COLUMNS = ["Rang", "MCC", "PR_AUC", "Brier", "R2_symbolic", "Latence_ms",
                  "lam", "mu1", "mu2", "W", "batch_size"]
 
 def _finite_max(values, fallback: float = 1.0) -> float:
-    """max() ignorant NaN/Inf — SALib peut renvoyer des indices non définis
+    """max() ignorant NaN/Inf  SALib peut renvoyer des indices non définis
     (réponse dégénérée sur un petit échantillon) ; jamais transmis tel quel à
     matplotlib set_xlim/set_ylim (ValueError "Axis limits cannot be NaN or Inf"
     sinon, qui ferait échouer tout results_export.py)."""
@@ -94,9 +94,9 @@ def _normalize_metrics(raw: Optional[dict]) -> dict:
     Normalise un dict de métriques quel que soit son format d'origine.
     Ne JAMAIS remplacer MCC_raw par MCC_clipped ; MCC_clipped n'est dérivé
     de MCC_raw (max(0, MCC_raw), formule imposée par l'Étape 2) que s'il est
-    absent de la source — jamais une métrique inventée, une conséquence
+    absent de la source  jamais une métrique inventée, une conséquence
     déterministe déjà spécifiée ailleurs dans le projet. Toute clé absente
-    des deux sources reste None (jamais 0 — section 20).
+    des deux sources reste None (jamais 0  section 20).
     """
     if not raw:
         return {k: None for k in CANONICAL_METRIC_KEYS}
@@ -173,7 +173,7 @@ class Step2ResultsExporter:
 
     Args:
         scratch_dir : répertoire source ET destination des exports (défaut
-                     "/workspace/scratch/" — le CLI expose --output_dir).
+                     "/workspace/scratch/"  le CLI expose --output_dir).
     """
 
     def __init__(self, scratch_dir: str = "/workspace/scratch/") -> None:
@@ -345,7 +345,7 @@ class Step2ResultsExporter:
                           "seule heuristic_best_config.json disponible.")
 
         json_rows = []
-        md_lines = [f"# Top-{top_k} configurations — Étape 2 MKAN", ""]
+        md_lines = [f"# Top-{top_k} configurations  Étape 2 MKAN", ""]
         header = TABLE_COLUMNS + ["Hyperparametres_conditionnels_actifs"]
         md_lines.append("| " + " | ".join(header) + " |")
         md_lines.append("|" + "|".join(["---"] * len(header)) + "|")
@@ -398,7 +398,7 @@ class Step2ResultsExporter:
             return None
 
         rankings = sorted(rankings_payload["rankings"], key=lambda r: -(r["S_Ti"] or 0.0))
-        md_lines = ["# Importance des hyperparamètres — Étape 2 MKAN", "",
+        md_lines = ["# Importance des hyperparamètres  Étape 2 MKAN", "",
                    "| Hyperparamètre | S_i | S_Ti | S_Ti/S_i | mu_star_Morris | Statut | Valeur_fixe_si_redondant |",
                    "|---|---|---|---|---|---|---|"]
         json_rows = []
@@ -508,7 +508,7 @@ class Step2ResultsExporter:
         ax.invert_yaxis()
         ax.set_xlim(0, 1)
         ax.set_xlabel("S_i")
-        ax.set_title("Indices de Sobol premier ordre (S_i) — Étape 2 MKAN")
+        ax.set_title("Indices de Sobol premier ordre (S_i)  Étape 2 MKAN")
         fig.tight_layout()
         fig.savefig(path, dpi=dpi)
         plt.close(fig)
@@ -544,7 +544,7 @@ class Step2ResultsExporter:
         ax.invert_yaxis()
         ax.set_xlim(0, max(1.0, _finite_max(s_ti) * 1.1))
         ax.set_xlabel("Indice de Sobol")
-        ax.set_title("Indices de Sobol totaux (S_Ti) — Étape 2 MKAN")
+        ax.set_title("Indices de Sobol totaux (S_Ti)  Étape 2 MKAN")
         ax.legend(loc="lower right", fontsize=8)
         fig.tight_layout()
         fig.savefig(path, dpi=dpi)
@@ -595,7 +595,7 @@ class Step2ResultsExporter:
         ax.set_ylim(0, y_max)
         ax.set_xlabel("mu* (importance moyenne)")
         ax.set_ylabel("sigma (non-linéarité / interaction)")
-        ax.set_title("Analyse Morris — Criblage des hyperparamètres MKAN")
+        ax.set_title("Analyse Morris  Criblage des hyperparamètres MKAN")
         fig.tight_layout()
         fig.savefig(path, dpi=dpi)
         plt.close(fig)
@@ -655,7 +655,7 @@ class Step2ResultsExporter:
                        fontsize=7, color="green")
         ax.set_xlabel("Numéro d'évaluation cumulé")
         ax.set_ylabel("Fitness")
-        ax.set_title(f"Convergence de la recherche heuristique étendue — "
+        ax.set_title(f"Convergence de la recherche heuristique étendue  "
                     f"{n_windows_label} fenêtres de validation")
         ax.legend(loc="lower right", fontsize=8)
         fig.tight_layout()
@@ -674,7 +674,7 @@ class Step2ResultsExporter:
         def fmt(x, na="N/A"):
             return f"{x:.4f}" if isinstance(x, (int, float)) else na
 
-        lines = ["# Résultats de l'Étape 2 — Recherche Heuristique Étendue et Analyse de Sensibilité", ""]
+        lines = ["# Résultats de l'Étape 2  Recherche Heuristique Étendue et Analyse de Sensibilité", ""]
 
         # ── 1. Configuration optimale ──
         lines.append("## 1. Configuration optimale retenue\n")
@@ -691,7 +691,7 @@ class Step2ResultsExporter:
             for gate in GATE_NAMES_TKAN:
                 cfg = config.get("gates", {}).get(gate)
                 if cfg is None:
-                    lines.append(f"| {gate} | N/A (absente — {config.get('Cell_Type')}) | |")
+                    lines.append(f"| {gate} | N/A (absente  {config.get('Cell_Type')}) | |")
                 else:
                     hp = {k: v for k, v in cfg.items() if k != "Base"}
                     lines.append(f"| {gate} | {cfg['Base']} | {json.dumps(hp, default=str)} |")
@@ -786,7 +786,7 @@ class Step2ResultsExporter:
     def _compare_by_group(self, field: str, labels: dict) -> list:
         evals = self._iter_evaluations()
         if not evals:
-            return ["extended_search_log.jsonl indisponible — comparaison non calculable."]
+            return ["extended_search_log.jsonl indisponible  comparaison non calculable."]
         groups: dict = {}
         for config, metrics, _ in evals:
             key = config.get(field)
@@ -821,13 +821,13 @@ class Step2ResultsExporter:
         else:
             rows.append("")
             rows.append("Comparaison incomplète : au moins un régime n'a pas été évalué dans le "
-                       "journal disponible — aucun résultat inventé pour le régime manquant.")
+                       "journal disponible  aucun résultat inventé pour le régime manquant.")
         return rows
 
     def _compare_cells(self) -> list:
         evals = self._iter_evaluations()
         if not evals:
-            return ["extended_search_log.jsonl indisponible — comparaison non calculable."]
+            return ["extended_search_log.jsonl indisponible  comparaison non calculable."]
         by_cell: dict = {}
         for config, metrics, _ in evals:
             ct = config.get("Cell_Type")
@@ -842,10 +842,10 @@ class Step2ResultsExporter:
 
         if best_tkan:
             c, m = best_tkan
-            rows.append(f"| TKANCell | {c.get('hidden_size')} | — | "
+            rows.append(f"| TKANCell | {c.get('hidden_size')} |  | "
                        f"{self._fmt_num(m['fitness_total'])} | {self._fmt_num(m['MCC_raw'])} |")
         else:
-            rows.append("| TKANCell | — | — | N/A (non évalué) | N/A |")
+            rows.append("| TKANCell |  |  | N/A (non évalué) | N/A |")
 
         if best_gru:
             c, m = best_gru
@@ -853,7 +853,7 @@ class Step2ResultsExporter:
             rows.append(f"| GRUKANCell | {c.get('hidden_size')} | {h_adj} | "
                        f"{self._fmt_num(m['fitness_total'])} | {self._fmt_num(m['MCC_raw'])} |")
         else:
-            rows.append("| GRUKANCell | — | — | N/A (non évalué) | N/A |")
+            rows.append("| GRUKANCell |  |  | N/A (non évalué) | N/A |")
 
         if best_tkan and best_gru:
             d_fit = best_gru[1]["fitness_total"] - best_tkan[1]["fitness_total"]

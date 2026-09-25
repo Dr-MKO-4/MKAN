@@ -44,7 +44,7 @@ ce module :
      GenericKANLayer/BASIS_REGISTRY (edges), ConfigurableMKANScorer /
      GRUMKANScorer + match_gru_hidden_size (lstm_cell.py, gru_cell.py),
      mkan_total_loss (loss.py), DMLAdam (optim.py), et surtout
-     fit_symbolic_best / SYMBOLIC_LIBRARY (symbolic.py) pour R2_symbolic —
+     fit_symbolic_best / SYMBOLIC_LIBRARY (symbolic.py) pour R2_symbolic 
      le dépôt fait explicitement le choix de ne pas dépendre de scipy pour
      la régression symbolique (descente de gradient Adam sur
      c*f(a*x+b)+d) ; on conserve ce choix plutôt que d'introduire
@@ -79,7 +79,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-# Ce module vit désormais dans MKAN/Etude_benchmarck/ (déplacé depuis MKAN/ —
+# Ce module vit désormais dans MKAN/Etude_benchmarck/ (déplacé depuis MKAN/ 
 # voir note de session) : edges, lstm_cell, gru_cell, niveau1_harness sont des
 # modules FRÈRES (même dossier, résolus automatiquement) ; heuristic_search,
 # loss, optim, symbolic vivent dans MKAN/ (le dossier parent) et doivent donc
@@ -119,12 +119,12 @@ from niveau1_harness import (                                 # noqa: E402
 def select_training_device(prefer: Optional[str] = None) -> torch.device:
     """
     Sélectionne le device d'ENTRAÎNEMENT (jamais celui de la mesure de latence,
-    qui reste toujours CPU — cf. _measure_latency_ms). Cascade : prefer explicite
+    qui reste toujours CPU  cf. _measure_latency_ms). Cascade : prefer explicite
     > MPS (Apple Silicon, ex. M4) > CUDA > CPU.
 
     Ne concerne QUE l'entraînement/l'inférence de recherche : la contrainte de
     latence USSD (100 ms, batch=256) est une propriété du canal de production
-    CPU-only, indépendante de la machine de développement — ce choix de device
+    CPU-only, indépendante de la machine de développement  ce choix de device
     n'a donc aucune influence sur le protocole de fitness lui-même.
     """
     if prefer:
@@ -279,7 +279,7 @@ INPUT_REGIMES  = ["raw", "engineered"]                   # raw=brut, engineered=
 _REGIME_TO_NIVEAU1 = {"raw": "brut", "engineered": "traite"}
 
 # Représentation "documentaire" complète exigée par la spécification
-# (Table espace_conditionnel) — dérivée de BASE_PARAM_SPACE/GATE_CANDIDATES,
+# (Table espace_conditionnel)  dérivée de BASE_PARAM_SPACE/GATE_CANDIDATES,
 # fournie pour audit/traçabilité (ne pilote pas directement sample_individual,
 # qui utilise BASE_PARAM_SPACE + GATE_CANDIDATES par construction).
 ESPACE_CONDITIONNEL: dict = {
@@ -307,12 +307,12 @@ def hidden_size_gru_adjusted(hidden_size: int) -> int:
 
     CORRECTIF (ex-version de step_2_search_extension_and_analysis.tex utilisait
     floor(sqrt(4/3)*d_h) ≈ floor(1.1547*d_h), présentée comme une "approximation
-    conservative couramment adoptée dans la littérature" — cette justification ne
+    conservative couramment adoptée dans la littérature"  cette justification ne
     correspondait à aucune pratique documentée et sous-budgétait la GRUKANCell de
     ~16% par rapport à la troncature directe de 4/3 (erreur mathématique confirmée
     et corrigée dans le document de référence). Le dépôt possède par ailleurs
     match_gru_hidden_size() (gru_cell.py), qui résout l'égalité paramétrique exacte
-    par porte — différente de cette formule fermée — utilisée par le protocole
+    par porte  différente de cette formule fermée  utilisée par le protocole
     Niveau 1 (niveau1_harness.py) ; on ne la modifie pas.
     """
     return math.floor((4.0 / 3.0) * hidden_size)
@@ -417,7 +417,7 @@ def validate_individual(individual: dict, raise_on_error: bool = False) -> bool:
             extra   = actual_keys - expected_keys
             missing = expected_keys - actual_keys
             return fail(f"Porte {gate} (base {base}) : clés en trop {extra}, "
-                        f"manquantes {missing} — hyperparamètre d'une base "
+                        f"manquantes {missing}  hyperparamètre d'une base "
                         f"inactive détecté" if extra else
                         f"Porte {gate} (base {base}) : hyperparamètres manquants {missing}")
         for name, domain in spec["params"].items():
@@ -510,13 +510,13 @@ def _sanitize_scores(scores: np.ndarray, context: str, max_bad_fraction: float =
     Détecte puis répare les scores NaN/Inf produits par le modèle en
     validation. AVANT ce correctif, np.nan_to_num remplaçait silencieusement
     ces valeurs par 0.5/1.0/0.0 sans qu'aucun signal n'indique qu'une
-    configuration produit des prédictions invalides — MCC/PR-AUC/Brier étaient
+    configuration produit des prédictions invalides  MCC/PR-AUC/Brier étaient
     alors calculés sur des scores partiellement fabriqués, avec un individu
     potentiellement défaillant recevant une fitness d'apparence normale.
 
     Cohérent avec le traitement d'une loss NaN pendant l'entraînement (échec
     immédiat, pas de réparation silencieuse) : au-delà de `max_bad_fraction`
-    (1 % par défaut — tolère une poignée de cas limites numériques sans tuer
+    (1 % par défaut  tolère une poignée de cas limites numériques sans tuer
     des configurations par ailleurs valides), la configuration est déclarée
     instable et l'évaluation échoue explicitement plutôt que de continuer sur
     des données partiellement inventées.
@@ -527,11 +527,11 @@ def _sanitize_scores(scores: np.ndarray, context: str, max_bad_fraction: float =
         fraction = n_bad / len(scores)
         from tqdm.auto import tqdm
         tqdm.write(f"  [AVERTISSEMENT] {context} : {n_bad}/{len(scores)} scores NaN/Inf "
-                  f"({fraction:.2%}) — configuration potentiellement instable.")
+                  f"({fraction:.2%})  configuration potentiellement instable.")
         if fraction > max_bad_fraction:
             raise RuntimeError(f"{context} : {n_bad}/{len(scores)} scores NaN/Inf "
                               f"({fraction:.2%}) dépasse le seuil de tolérance "
-                              f"({max_bad_fraction:.2%}) — configuration instable rejetée.")
+                              f"({max_bad_fraction:.2%})  configuration instable rejetée.")
     return np.nan_to_num(scores, nan=0.5, posinf=1.0, neginf=0.0).clip(0.0, 1.0)
 
 
@@ -546,7 +546,7 @@ def _release_device_memory(device) -> None:
     partagée avec le reste du système).
 
     Ne lève JAMAIS : appelée depuis un bloc `finally` (compute_fitness,
-    evaluate_best_on_full_validation) — si cette purge échouait elle-même
+    evaluate_best_on_full_validation)  si cette purge échouait elle-même
     (ex. empty_cache() instable sur un pilote MPS particulier), une exception
     non interceptée ICI remplacerait silencieusement le `return result` déjà
     construit par le try/except appelant, perdant un résultat de fitness
@@ -560,7 +560,7 @@ def _release_device_memory(device) -> None:
             torch.mps.empty_cache()
         elif device_type == "cuda" and torch.cuda.is_available():
             torch.cuda.empty_cache()
-    except Exception as exc:   # noqa: BLE001 — voir docstring : ne doit jamais remonter
+    except Exception as exc:   # noqa: BLE001  voir docstring : ne doit jamais remonter
         from tqdm.auto import tqdm
         tqdm.write(f"  [avertissement] libération mémoire device échouée (ignorée) : {exc}")
 
@@ -572,19 +572,19 @@ def _penalty_latency(latency_ms: float, alpha_lat: float = 10.0) -> float:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# NSGA-II — tri par dominance contrainte (Deb, Pratab, Agarwal, Meyarivan,
+# NSGA-II  tri par dominance contrainte (Deb, Pratab, Agarwal, Meyarivan,
 # 2002, "A Fast and Elitist Multiobjective Genetic Algorithm: NSGA-II",
 # IEEE Trans. Evolutionary Computation 6(2):182-197). Remplace la fitness
 # scalaire agrégée comme mécanisme DE SÉLECTION de la recherche (élitisme,
-# tournoi, injection de diversité, modèle EDA) — cf. ExtendedHeuristicSearch.
+# tournoi, injection de diversité, modèle EDA)  cf. ExtendedHeuristicSearch.
 # La latence n'est PAS un 5e objectif libre à minimiser indéfiniment : elle
 # reste une CONTRAINTE de seuil (100 ms, protocole du mémoire) traitée par le
 # principe de dominance contrainte (§II.B de Deb et al.), fidèle à la
 # sémantique opérationnelle (un individu à 5 ms n'est pas "meilleur" qu'un
-# individu à 90 ms — les deux respectent la contrainte USSD).
+# individu à 90 ms  les deux respectent la contrainte USSD).
 # ══════════════════════════════════════════════════════════════════════════
 
-LATENCY_CONSTRAINT_MS = 100.0   # seuil USSD du protocole — inchangé
+LATENCY_CONSTRAINT_MS = 100.0   # seuil USSD du protocole  inchangé
 
 
 def _objective_vector(fitness_components: dict) -> tuple:
@@ -696,12 +696,12 @@ def _compute_r2_symbolic(model: torch.nn.Module, x_pool: torch.Tensor,
                          max_edges: int = 40, domain: float = 2.0) -> float:
     """
     R2_symbolic (section 3, R² symbolique) : élagage (arête survivante si
-    L1 > theta) puis régression symbolique par gradient — mêmes familles de
+    L1 > theta) puis régression symbolique par gradient  mêmes familles de
     fonctions, même objectif c*f(a*x+b)+d, mêmes hyperparamètres (150 pas
     Adam, lr=0.05) que symbolic.fit_symbolic_best/SYMBOLIC_LIBRARY, mais
     ENTIÈREMENT VECTORISÉE EN TENSEURS PYTORCH plutôt qu'ajustée arête par
     arête : au lieu de E arêtes × 13 familles × 150 pas Adam SÉQUENTIELS
-    (jusqu'à 78 000 micro-optimisations Python par évaluation fitness — le
+    (jusqu'à 78 000 micro-optimisations Python par évaluation fitness  le
     principal goulot d'étranglement mesuré de compute_fitness), les E arêtes
     survivantes sont ajustées SIMULTANÉMENT pour chaque famille : les
     paramètres a,b,c,d ont la forme (E,1) et une seule passe Adam à 150 pas
@@ -710,7 +710,7 @@ def _compute_r2_symbolic(model: torch.nn.Module, x_pool: torch.Tensor,
     Équivalence garantie : la perte totale sommée sur les arêtes
     (`per_edge_loss.sum()`) a, pour le paramètre a[e]/b[e]/c[e]/d[e] d'une
     arête e, EXACTEMENT le même gradient que si cette arête était ajustée
-    seule avec sa propre perte moyenne sur 100 points — aucune arête n'est
+    seule avec sa propre perte moyenne sur 100 points  aucune arête n'est
     couplée à une autre dans le calcul (produits/sommes strictement
     élément-par-élément), donc la trajectoire d'optimisation de chaque
     arête est identique au cas séquentiel. Une arête qui diverge (NaN/Inf)
@@ -720,7 +720,7 @@ def _compute_r2_symbolic(model: torch.nn.Module, x_pool: torch.Tensor,
 
     max_edges plafonne le nombre d'arêtes survivantes effectivement
     évaluées symboliquement, pour borner le temps d'une évaluation fitness
-    pendant la recherche — même logique de tractabilité que
+    pendant la recherche  même logique de tractabilité que
     audit.prune_and_extract(top_k=...).
 
     Retourne 0.0 si aucune arête ne survit à l'élagage.
@@ -749,7 +749,7 @@ def _compute_r2_symbolic(model: torch.nn.Module, x_pool: torch.Tensor,
     n_edges = len(survivors)
 
     # ── Extraction des courbes marginales (E passages forward bon marché :
-    #    100 points chacun — négligeable face à l'ajustement ci-dessous) ──────
+    #    100 points chacun  négligeable face à l'ajustement ci-dessous) ──────
     x_grid = torch.linspace(-domain, domain, 100)
     curves = torch.empty(n_edges, 100)
     with torch.no_grad():
@@ -761,7 +761,7 @@ def _compute_r2_symbolic(model: torch.nn.Module, x_pool: torch.Tensor,
     # ── Ajustement symbolique vectorisé : toutes les arêtes en parallèle,
     #    une passe Adam (150 pas) par famille de fonctions ─────────────────
     best_r2 = torch.full((n_edges,), -float("inf"))
-    x_row = x_grid.unsqueeze(0)   # (1, 100) — broadcast vers (E, 100)
+    x_row = x_grid.unsqueeze(0)   # (1, 100)  broadcast vers (E, 100)
 
     from tqdm.auto import tqdm
     for fn in tqdm(SYMBOLIC_LIBRARY.values(), desc="    R2_symbolic - familles",
@@ -818,28 +818,28 @@ def compute_fitness(
 
     Args:
         config          : individu validé (cf. sample_individual/validate_individual)
-        df_train_sample : DataFrame transactionnel brut (colonnes MoMTSim) — le pool
+        df_train_sample : DataFrame transactionnel brut (colonnes MoMTSim)  le pool
                            depuis lequel n_windows_eval fenêtres train sont tirées.
         df_val_sample   : idem pour la validation.
         device          : device d'ENTRAÎNEMENT (ex. "mps" sur Apple M4). La latence
                            est TOUJOURS mesurée sur CPU, indépendamment de ce paramètre
-                           (cf. _measure_latency_ms) — la contrainte USSD de production
+                           (cf. _measure_latency_ms)  la contrainte USSD de production
                            est une contrainte CPU, pas une propriété du device de dev.
         n_windows_eval  : nombre de fenêtres train/val sous-échantillonnées
-                           (configurable, jamais codé en dur — section 4).
+                           (configurable, jamais codé en dur  section 4).
         n_epochs_eval   : nombre d'époques d'entraînement rapide (configurable).
         enable_latency_penalty : si False, latence et penalty_lat sont TOUJOURS
                            mesurées/calculées et conservées dans fitness_components
                            (traçabilité), mais penalty_lat n'est PAS soustraite de
                            fitness_total. Décision explicite de l'utilisateur pour ses
                            propres runs (recherche sur GPU M4, hors contrainte USSD
-                           CPU de production) — le protocole du mémoire (seuil 100 ms,
+                           CPU de production)  le protocole du mémoire (seuil 100 ms,
                            pénalité quadratique, mesure CPU/batch=256) reste intact et
                            reproductible avec enable_latency_penalty=True (défaut).
         window_cache    : dict optionnel {(regime, W): (X_tr, y_tr, X_vl, y_vl, feature_cols)}
                            tenu par l'appelant (ExtendedHeuristicSearch._window_cache),
                            réutilisé entre individus partageant (Input_Regime, W).
-                           Optimisation pure — AUCUN effet sur le résultat numérique :
+                           Optimisation pure  AUCUN effet sur le résultat numérique :
                            `seed` est fixe sur toute une recherche, donc le sous-
                            échantillon de n_windows_eval fenêtres tiré pour un (regime, W)
                            donné est BIT-IDENTIQUE à chaque appel (même df source, même
@@ -853,7 +853,7 @@ def compute_fitness(
         dict {'fitness_total', 'fitness_components', 'model_state', 'n_params',
               'hidden_size_gru_adjusted', 'error'}
         En cas d'échec, 'error' contient le message et 'fitness_total' vaut
-        invalid_fitness (cf. ExtendedHeuristicSearch.invalid_fitness) — cette
+        invalid_fitness (cf. ExtendedHeuristicSearch.invalid_fitness)  cette
         fonction ne lève jamais d'exception non contrôlée (section 14).
     """
     from sklearn.metrics import matthews_corrcoef, average_precision_score, brier_score_loss
@@ -905,7 +905,7 @@ def compute_fitness(
         model.train()
         from tqdm.auto import tqdm
         # Seule étape sans retour visuel jusqu'ici : jusqu'à n_epochs_eval ×
-        # (n_windows_eval/batch_size) pas — ex. 10 × (50000/32) ≈ 15 600 pas
+        # (n_windows_eval/batch_size) pas  ex. 10 × (50000/32) ≈ 15 600 pas
         # pour un petit batch_size, potentiellement la portion la plus longue
         # d'une évaluation individuelle. leave=False : disparaît une fois
         # l'individu terminé, la barre "individus" au-dessus reste la trace
@@ -915,7 +915,7 @@ def compute_fitness(
             perm = torch.randperm(n, device=device)
             # Accumulation en TENSEUR (pas de .item() par batch) : un .item()
             # par batch forcerait une synchronisation GPU à chaque pas (casse
-            # le pipeline asynchrone MPS/CUDA — exactement le genre de coût
+            # le pipeline asynchrone MPS/CUDA  exactement le genre de coût
             # qu'on vient d'éliminer ailleurs). Une seule synchronisation par
             # époque (après la boucle), coût négligeable.
             # Non in-place (epoch_loss_sum = ... + ...) : mkan_total_loss peut
@@ -1008,7 +1008,7 @@ def compute_fitness(
             "error": None,
         }
 
-    except Exception as exc:   # noqa: BLE001 — section 14 : jamais planter la recherche
+    except Exception as exc:   # noqa: BLE001  section 14 : jamais planter la recherche
         return {
             "fitness_total": None,
             "fitness_components": None,
@@ -1019,13 +1019,13 @@ def compute_fitness(
             "error": f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=3)}",
         }
     finally:
-        # Libération explicite — critique sur MPS/CUDA (bug rapporté : "MPS backend
+        # Libération explicite  critique sur MPS/CUDA (bug rapporté : "MPS backend
         # out of memory" après quelques générations). Chaque appel construit un
         # nouveau modèle + optimiseur + tenseurs d'entraînement sur `device` ; les
         # graphes autograd forment des cycles de références que le comptage de
         # références de Python ne collecte pas seul (il faut gc.collect()), et
         # l'allocateur "caching" de MPS/CUDA ne restitue pas la mémoire libérée au
-        # driver tant que empty_cache() n'est pas appelé explicitement — sans ces
+        # driver tant que empty_cache() n'est pas appelé explicitement  sans ces
         # deux étapes, la mémoire GPU croît de façon monotone au fil des individus/
         # générations jusqu'à l'OOM. Le state_dict retourné est déjà cloné sur CPU
         # (ligne "model_state": ...) : cette purge n'affecte jamais la valeur renvoyée.
@@ -1033,7 +1033,7 @@ def compute_fitness(
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 4. ExtendedHeuristicSearch — algorithme génétique sur l'espace conditionnel
+# 4. ExtendedHeuristicSearch  algorithme génétique sur l'espace conditionnel
 # ══════════════════════════════════════════════════════════════════════════
 
 class ExtendedHeuristicSearch(RechercheHeuristique):
@@ -1046,7 +1046,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
     sa compatibilité d'interface (attributs `_population`/`_scores`/
     `_journal`, propriétés `.history`/`.best`) ; les méthodes internes de
     génération/croisement/mutation/diversité/EDA sont redéfinies car
-    l'espace de recherche n'est plus un simple dict {param: [valeurs]} —
+    l'espace de recherche n'est plus un simple dict {param: [valeurs]} 
     __init__ appelle le parent avec un espace factice à but de validation
     uniquement (jamais utilisé pour échantillonner un individu).
     """
@@ -1091,11 +1091,11 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         # Contrainte de latence (100 ms, protocole du mémoire) appliquée via le
         # principe de dominance contrainte (Deb et al., 2002) : un individu qui
         # la viole est toujours dominé par un individu réalisable. Si False, la
-        # contrainte est ignorée (tous les individus traités comme réalisables) —
+        # contrainte est ignorée (tous les individus traités comme réalisables) 
         # décision explicite pour un usage hors contrainte USSD de production ;
         # la latence reste toujours mesurée/journalisée dans tous les cas.
         self.enforce_latency_constraint = enforce_latency_constraint
-        # Propagé explicitement à compute_fitness (cf. _evaluer_un) — remplace
+        # Propagé explicitement à compute_fitness (cf. _evaluer_un)  remplace
         # le monkeypatch de fonction module-level utilisé précédemment par
         # run_search.py (_ehs.compute_fitness = ...), fragile et incohérent
         # avec le vrai paramètre d'instance déjà utilisé pour
@@ -1166,7 +1166,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
     # RechercheHeuristique._elites() est HÉRITÉE telle quelle (non redéfinie
     # ici) : elle appelle self._indices_tries(), dont l'override ci-dessous
     # suffit par polymorphisme à la rendre NSGA-II-consciente sans dupliquer
-    # son code — idem pour son usage dans _injecter_diversite() (ci-dessus)
+    # son code  idem pour son usage dans _injecter_diversite() (ci-dessus)
     # et _eda_frequences() (plus bas).
 
     def _compute_rank_and_crowding(self) -> None:
@@ -1176,7 +1176,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         self._components (fitness_components par individu). Appelée une fois
         par génération, juste après évaluation, avant toute sélection.
         Individus invalides (components=None, échec d'évaluation) : forcés au
-        pire rang possible + crowding nul — jamais sélectionnés en élite/tournoi.
+        pire rang possible + crowding nul  jamais sélectionnés en élite/tournoi.
         """
         n = len(self._population)
         objs, cvs, valid_idx = [], [], []
@@ -1204,8 +1204,8 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
     def _indices_tries(self) -> list:
         """
         Redéfinition NSGA-II de RechercheHeuristique._indices_tries() :
-        opérateur de comparaison encombré (Deb et al., 2002, §III.A) — rang de
-        front croissant, puis distance de crowding décroissante à rang égal —
+        opérateur de comparaison encombré (Deb et al., 2002, §III.A)  rang de
+        front croissant, puis distance de crowding décroissante à rang égal 
         au lieu du tri par score scalaire du parent. _elites(), héritée,
         utilise transparemment ce nouvel ordre.
         """
@@ -1219,7 +1219,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
 
         Utilise self._rng (pas le module `random` global, contrairement à
         RechercheHeuristique._tournoi hérité) : reproductibilité complète sous
-        seed fixe — tout le reste du tirage aléatoire propre à
+        seed fixe  tout le reste du tirage aléatoire propre à
         ExtendedHeuristicSearch (génération d'individus, croisement, mutation,
         EDA) passe déjà par self._rng ; seule la sélection par tournoi héritée
         du parent utilisait encore le générateur global avant cette redéfinition.
@@ -1234,7 +1234,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
 
     def _selectionner_parents(self) -> list:
         """
-        NSGA-II : élites + tournoi uniquement (Deb et al., 2002) — la sélection
+        NSGA-II : élites + tournoi uniquement (Deb et al., 2002)  la sélection
         par roulette du parent (proportionnelle à un score scalaire) n'a pas de
         sens pour une sélection multi-objectifs par dominance et est retirée
         (contrairement à RechercheHeuristique._selectionner_parents, qui
@@ -1450,7 +1450,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         dans scratch_dir, reprend exactement où la recherche précédente s'est
         arrêtée (population, scores, journal, meilleur individu, taux de
         mutation, compteur d'évaluations, état RNG) au lieu de repartir de
-        zéro — permet d'interrompre puis relancer un run long (section 11).
+        zéro  permet d'interrompre puis relancer un run long (section 11).
         Si aucun checkpoint n'existe, démarre normalement (pas une erreur).
         """
         resumed = False
@@ -1477,7 +1477,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             # df_val : appeler fit() une seconde fois sur la MÊME instance avec des
             # données différentes (notebook, sweep programmatique) réutiliserait
             # silencieusement les fenêtres de l'appel précédent sans la moindre
-            # erreur ni avertissement — résultats faux, aucun signal. Un nouveau
+            # erreur ni avertissement  résultats faux, aucun signal. Un nouveau
             # run() (resume=False) reconstruit forcément ses fenêtres à neuf ; un
             # resume garde le cache car il poursuit la MÊME recherche sur les
             # MÊMES données par construction.
@@ -1504,7 +1504,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             moy = sum(scores_valides) / len(scores_valides) if scores_valides else float("nan")
             # Clés de postfix/print en ASCII (pas "μ") : certains terminaux (notamment
             # Windows avec la page de code cp1252 par défaut) plantent sur des
-            # caractères hors de leur jeu de caractères lors de l'écriture tqdm —
+            # caractères hors de leur jeu de caractères lors de l'écriture tqdm 
             # constaté en pratique (UnicodeEncodeError sur "μ"/"→"/"↑"/"├" dans
             # gen_pbar.write). Les commentaires/docstrings du code gardent leurs
             # accents (jamais imprimés sur un terminal), seule la sortie console
@@ -1513,7 +1513,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             gen_pbar.set_postfix({"best": f"{self._best_score:.4f}", "moy": f"{moy:.4f}",
                                   "div": f"{diversite:.2f}", "mu": f"{self._mutation_rate_courant:.3f}"})
             # tqdm.write() (et non print()) : efface proprement la barre active, écrit
-            # la ligne, puis la redessine en dessous — évite le rendu cassé/dupliqué
+            # la ligne, puis la redessine en dessous  évite le rendu cassé/dupliqué
             # que print() provoque au milieu d'une barre tqdm ouverte (leave=True).
             gen_pbar.write(f"Gen {gen + 1:02d}/{self.n_generations} | best={self._best_score:.4f} | "
                           f"moy={moy:.4f} | div={diversite:.2f} | "
@@ -1536,7 +1536,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
     def export_pareto_front(self, path: Optional[str] = None) -> str:
         """
         Écrit l'archive Pareto cumulée (front non-dominé, dominance contrainte
-        latence) — le véritable résultat scientifique d'une recherche multi-
+        latence)  le véritable résultat scientifique d'une recherche multi-
         objectifs NSGA-II, par opposition au représentant unique de
         heuristic_best_config.json (conservé pour compatibilité descendante
         avec sensitivity_analysis.py/results_export.py, qui attendent UNE
@@ -1608,7 +1608,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
 
         # Chaque échec individuel produit déjà une ligne [ERREUR], mais rien ne
         # signale explicitement un ÉCHEC SYSTÉMIQUE (tous les individus tombent
-        # sur la même cause racine — mauvais fichier de données, schéma de
+        # sur la même cause racine  mauvais fichier de données, schéma de
         # colonnes incorrect, device cassé...) : sans ce contrôle, la recherche
         # continue silencieusement génération après génération sans jamais
         # améliorer le front (patience finit par arrêter, mais sans indiquer
@@ -1616,7 +1616,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         # survient.
         if to_eval and n_echecs == len(to_eval):
             tqdm.write(f"  [AVERTISSEMENT] gén={gen} : {n_echecs}/{len(to_eval)} individus ont "
-                      f"ÉCHOUÉ (0 individu valide cette génération) — vérifier les fichiers de "
+                      f"ÉCHOUÉ (0 individu valide cette génération)  vérifier les fichiers de "
                       f"données/schéma/device : voir les lignes [ERREUR] ci-dessus pour la "
                       f"cause exacte (souvent la même pour tous).")
 
@@ -1632,7 +1632,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                                          n_epochs_eval=self.n_epochs_eval, seed=self.seed,
                                          window_cache=self._window_cache,
                                          enable_latency_penalty=self.enable_latency_penalty)
-            except Exception as exc:   # noqa: BLE001 — robustesse absolue (section 14)
+            except Exception as exc:   # noqa: BLE001  robustesse absolue (section 14)
                 result = {"fitness_total": None, "fitness_components": None,
                           "model_state": None,
                           "error": f"exception non interceptée par compute_fitness : {exc}"}
@@ -1653,7 +1653,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             # interrompre toute la recherche en cours ni empêcher la mise à jour de
             # l'état EN MÉMOIRE (self._best_individual/_best_result restent la
             # source de vérité pour get_best_model()/export_top5() même si le
-            # disque a momentanément refusé l'écriture) — seul un avertissement est
+            # disque a momentanément refusé l'écriture)  seul un avertissement est
             # émis, la recherche continue.
             self._safe_disk_write("_log_evaluation", self._log_evaluation,
                                   gen, individual_id, individual, result)
@@ -1677,20 +1677,20 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
     def _safe_disk_write(label: str, fn, *args) -> None:
         try:
             fn(*args)
-        except OSError as exc:   # noqa: BLE001 — jamais interrompre la recherche pour un incident I/O
+        except OSError as exc:   # noqa: BLE001  jamais interrompre la recherche pour un incident I/O
             from tqdm.auto import tqdm
-            tqdm.write(f"  [AVERTISSEMENT] écriture disque échouée ({label}) : {exc} — "
+            tqdm.write(f"  [AVERTISSEMENT] écriture disque échouée ({label}) : {exc}  "
                       "état en mémoire conservé, recherche poursuivie.")
 
     def _is_better_representative(self, cand_comp: dict, best_comp: dict) -> bool:
         """
         Règle de remplacement du représentant unique (best_candidate.pt /
-        heuristic_best_config.json) — dominance contrainte D'ABORD (Deb et al.,
+        heuristic_best_config.json)  dominance contrainte D'ABORD (Deb et al.,
         2002), remplace la comparaison scalaire `>` de l'ancienne version.
         Si cand domine best (ou best viole la contrainte et pas cand) : cand
         remplace. Si best domine cand : jamais. Si mutuellement non-dominés
         (aucun ne domine l'autre) : départage par fitness_total (AHP,
-        section~3.3.2) — SEUL point où le scalaire intervient encore, en
+        section~3.3.2)  SEUL point où le scalaire intervient encore, en
         tie-break documenté et non en décision primaire.
         """
         obj_c = _objective_vector(cand_comp)
@@ -1723,7 +1723,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         """
         Met à jour l'archive Pareto cumulée (section pareto_front.json) et
         retourne si le REPRÉSENTANT unique (best_candidate.pt) a changé
-        pendant cette génération — la décision de remplacement elle-même a
+        pendant cette génération  la décision de remplacement elle-même a
         déjà eu lieu dans _evaluer_un (sous verrou, dominance contrainte,
         cf. _is_better_representative) ; ici on ne fait que lire le drapeau
         posé à ce moment-là et rafraîchir l'archive complète.
@@ -1736,7 +1736,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         Recalcule l'archive Pareto cumulée = front non-dominé de (archive
         précédente ∪ individus valides de la génération courante), avec
         dominance contrainte (latence, section~3.4 du mémoire). Ne conserve
-        que {individual, fitness_components} — jamais de state_dict (l'archive
+        que {individual, fitness_components}  jamais de state_dict (l'archive
         peut grossir sur toute la recherche ; seul le représentant unique
         conserve ses poids, cf. _is_better_representative/_save_best_candidate).
         """
@@ -1786,15 +1786,15 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         self, df_train_for_stats: pd.DataFrame, df_val_full: pd.DataFrame, device="cpu",
     ) -> Optional[dict]:
         """
-        Réévalue le meilleur modèle trouvé — poids déjà entraînés (best_candidate.pt),
-        AUCUN ré-entraînement ici — sur la TOTALITÉ des fenêtres de df_val_full
+        Réévalue le meilleur modèle trouvé  poids déjà entraînés (best_candidate.pt),
+        AUCUN ré-entraînement ici  sur la TOTALITÉ des fenêtres de df_val_full
         (pas de sous-échantillonnage, contrairement à compute_fitness). Conforme à
         step_2_search_extension_and_analysis.tex : « Une validation finale sur
         l'ensemble des 450 955 fenêtres de validation est conduite pour les 5
         meilleures configurations issues de la recherche. »
 
         Écart documenté : seule la MEILLEURE configuration est ré-évaluée ici (ses
-        poids entraînés sont les seuls conservés par ExtendedHeuristicSearch —
+        poids entraînés sont les seuls conservés par ExtendedHeuristicSearch 
         cf. _save_best_candidate) et non les 5 meilleures indépendamment, ce qui
         nécessiterait de conserver 5 state_dict complets pendant la recherche
         (non implémenté). export_top5() fournit les 5 configurations et leurs
@@ -1803,7 +1803,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
 
         Les statistiques de standardisation sont ajustées sur df_train_for_stats
         (même convention que compute_fitness : ajustement sur le train, jamais
-        sur la validation — évite la fuite de données) puis appliquées à
+        sur la validation  évite la fuite de données) puis appliquées à
         df_val_full.
 
         Returns:
@@ -1836,7 +1836,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             batch_size = int(self._best_individual["batch_size"])
             # X_vl reste sur CPU ; seul le batch courant est transféré sur `device`
             # (jusqu'à 450 955 fenêtres en une seule fois serait ~qq centaines de Mo
-            # à ~1 Go selon W — significatif sur la mémoire unifiée d'Apple Silicon,
+            # à ~1 Go selon W  significatif sur la mémoire unifiée d'Apple Silicon,
             # partagée avec le reste du système).
             X_vl_cpu = torch.from_numpy(X_vl)
             scores_parts = []
@@ -1848,7 +1848,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             scores = _sanitize_scores(scores, "evaluate_best_on_full_validation")
 
             if len(np.unique(y_vl)) < 2:
-                self._warn_full_validation("une seule classe présente dans df_val_full — "
+                self._warn_full_validation("une seule classe présente dans df_val_full  "
                                            "métriques non calculables")
                 return None
 
@@ -1862,7 +1862,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             self._validation_full = result
             self._write_best_config_json()   # propage validation_full dans le fichier canonique
             return result
-        except Exception as exc:   # noqa: BLE001 — ne jamais interrompre pour cette étape optionnelle
+        except Exception as exc:   # noqa: BLE001  ne jamais interrompre pour cette étape optionnelle
             self._warn_full_validation(f"{type(exc).__name__}: {exc}")
             return None
         finally:
@@ -1915,7 +1915,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                 # contrainte NSGA-II (Deb et al., 2002), pas par comparaison
                 # scalaire ; ce fichier ne décrit qu'UN représentant du front
                 # (le point le plus proche par dominance, départagé par fitness_total
-                # AHP en cas de non-dominance mutuelle) — le front complet est dans
+                # AHP en cas de non-dominance mutuelle)  le front complet est dans
                 # pareto_front.json.
                 "selection_method": "NSGA-II (constrained-domination, Deb et al. 2002)",
                 "pareto_front_file": os.path.basename(self._pareto_front_path),
@@ -1971,7 +1971,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         historique, meilleur individu, taux de mutation, compteur d'évaluations,
         état RNG) ainsi que best_candidate.pt (state_dict du meilleur modèle, trop
         volumineux pour le JSON) si présent. Retourne False si aucun checkpoint
-        n'existe (première exécution — pas une erreur).
+        n'existe (première exécution  pas une erreur).
         """
         path = checkpoint_path or self._checkpoint_path
         if not os.path.exists(path):
@@ -2003,8 +2003,8 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                     "fitness_components": _comp,
                     "fitness_total": _comp.get("fitness_total"),   # requis par _evaluer_un (comparaison)
                 }
-            except Exception as exc:   # noqa: BLE001 — reprise best-effort (section 11)
-                print(f"  [avertissement] best_candidate.pt illisible au resume ({exc}) — "
+            except Exception as exc:   # noqa: BLE001  reprise best-effort (section 11)
+                print(f"  [avertissement] best_candidate.pt illisible au resume ({exc})  "
                      "_best_result non restauré (get_best_model() restera indisponible).")
         return True
 
@@ -2013,7 +2013,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         Recharge l'état disponible (population, scores, historique, meilleur
         individu, seed/RNG) et affiche/retourne un résumé par génération.
         Lève FileNotFoundError si aucun checkpoint n'existe (usage : inspection
-        explicite d'un run passé — cf. fit(resume_from_checkpoint=True) pour
+        explicite d'un run passé  cf. fit(resume_from_checkpoint=True) pour
         reprendre une recherche interrompue sans erreur si rien n'est trouvé).
         """
         path = checkpoint_path or self._checkpoint_path
@@ -2062,13 +2062,13 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                                  name="Fitness moyenne", line=dict(dash="dot", color="#FF9800")))
         fig.add_trace(go.Scatter(x=x, y=stats["max"].tolist(), mode="lines+markers",
                                  name="Meilleur de la génération", line=dict(color="#2196F3")))
-        fig.update_layout(title="Convergence — recherche heuristique étendue (Étape 2)",
+        fig.update_layout(title="Convergence  recherche heuristique étendue (Étape 2)",
                           xaxis_title="Génération", yaxis_title="Fitness", template="plotly_white")
         out_path = os.path.join(self.scratch_dir, "fitness_convergence_extended.png")
         try:
             fig.write_image(out_path)
         except Exception as exc:   # kaleido peut manquer selon l'environnement
-            print(f"  [avertissement] export PNG impossible ({exc}) — export HTML de repli.")
+            print(f"  [avertissement] export PNG impossible ({exc})  export HTML de repli.")
             fig.write_html(out_path.replace(".png", ".html"))
         return fig
 

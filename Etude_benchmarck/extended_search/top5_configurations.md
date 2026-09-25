@@ -1,4 +1,4 @@
-# Top-5 configurations — Étape 2 MKAN
+# Top-5 configurations  Étape 2 MKAN
 
 | Rang | MCC | PR_AUC | Brier | R2_symbolic | Latence_ms | Fitness_totale | Base_Forget | Base_Input | Base_Candidate | Base_Output | Cell_Type | Input_Regime | hidden_size | lr | lam | mu1 | mu2 | W | batch_size | Hyperparametres_conditionnels_actifs |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|

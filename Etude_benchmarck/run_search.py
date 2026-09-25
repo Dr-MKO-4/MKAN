@@ -12,14 +12,14 @@ contrainte (--no-latency-constraint pour la désactiver), pas comme un 5e
 objectif libre. Le résultat scientifique complet est le front de Pareto
 (pareto_front.json) ; heuristic_best_config.json ne décrit qu'UN représentant
 de ce front (compatibilité descendante avec sensitivity_analysis.py/
-results_export.py, qui attendent une configuration unique) — la fitness_total
+results_export.py, qui attendent une configuration unique)  la fitness_total
 AHP (§3.3.2 du mémoire) n'intervient plus que comme départage entre points
 mutuellement non-dominés, jamais comme critère de sélection primaire.
 
 Sources de données (branchées sur le workflow réel, cf. train.ipynb) :
     Train : MOMTSIM/config/featuresLog.parquet   (~5,5 M tx, pool d'entraînement)
     Val   : data/val_features.parquet            (150 K clients, seed 1001, ~1,65 M tx)
-    Test  : data/test_features.parquet           (150 K clients, seed 1002, ~1,65 M tx —
+    Test  : data/test_features.parquet           (150 K clients, seed 1002, ~1,65 M tx 
                                                     chargé mais PAS utilisé par la fitness ;
                                                     réservé à une évaluation finale hors
                                                     recherche, comme dans train.ipynb)
@@ -27,17 +27,17 @@ Sources de données (branchées sur le workflow réel, cf. train.ipynb) :
 Préprocessing : compute_fitness() (extended_heuristic_search.py) construit déjà
 lui-même les régimes "raw"/"engineered" par appel à niveau1_harness.
 build_regime_frame + standardize + build_windows pour CHAQUE individu (le
-régime dépend de Input_Regime, un hyperparamètre structurel recherché — il ne
+régime dépend de Input_Regime, un hyperparamètre structurel recherché  il ne
 peut donc pas être pré-calculé une fois pour toutes en dehors de la fitness).
 Ce pipeline est une simplification DÉLIBÉRÉE et documentée (niveau1_harness.py)
 du pipeline de train.ipynb (TopologyValidator + test de Kolmogorov-Smirnov par
 colonne) : train.ipynb ne traite que le régime "engineered" à 12 features avec
 un modèle d'architecture FIXE, alors que l'Étape 2 doit comparer "raw" et
-"engineered" pour une architecture VARIABLE (recherchée) — les deux pipelines
+"engineered" pour une architecture VARIABLE (recherchée)  les deux pipelines
 coexistent pour des besoins différents, aucun des deux n'est remplacé ici.
 
 Device d'entraînement : sélection automatique MPS (Apple Silicon, ex. M4) >
-CUDA > CPU via select_training_device() — SANS AUCUN effet sur la latence de
+CUDA > CPU via select_training_device()  SANS AUCUN effet sur la latence de
 fitness, qui reste toujours mesurée sur CPU/batch=256 (contrainte USSD de
 production, indépendante de la machine de développement).
 
@@ -50,7 +50,7 @@ du mémoire (pénalité activée) reste reproductible via --enable-latency-penal
 Reprise / checkpointing : --resume (activé par défaut) recharge automatiquement
 search_checkpoint.json s'il existe et continue exactement où la recherche
 précédente s'est arrêtée (population, scores, historique, meilleur individu,
-taux de mutation, état RNG) — Ctrl+C puis relancer la même commande reprend le
+taux de mutation, état RNG)  Ctrl+C puis relancer la même commande reprend le
 run sans perte. Tous les artefacts (extended_search_log.jsonl,
 heuristic_best_config.json, best_candidate.pt, fitness_convergence_extended.png)
 sont réécrits à chaque génération, donc consultables/graphables pendant que le
@@ -110,7 +110,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--enable-latency-penalty", dest="enable_latency_penalty",
                    action="store_true", default=False,
                    help="Réactive la pénalité de latence dans la fitness_total AHP "
-                        "(protocole intégral du mémoire, seuil 100 ms) — utilisée UNIQUEMENT "
+                        "(protocole intégral du mémoire, seuil 100 ms)  utilisée UNIQUEMENT "
                         "comme départage en cas de non-dominance mutuelle (cf. "
                         "--no-latency-constraint pour la contrainte NSGA-II elle-même). "
                         "Désactivée par défaut dans ce script (recherche sur GPU M4, hors "
@@ -137,7 +137,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--skip-sensitivity", dest="run_sensitivity", action="store_false",
                    default=True,
                    help="Ne pas lancer l'analyse de sensibilité (Sobol+Morris) après la "
-                        "recherche. Activée par défaut — coûteuse (jusqu'à N*(d+2) + "
+                        "recherche. Activée par défaut  coûteuse (jusqu'à N*(d+2) + "
                         "r*(d+1) évaluations, d ~= 48 : potentiellement des dizaines de "
                         "milliers d'entraînements avec les valeurs par défaut).")
     p.add_argument("--sensitivity_N", type=int, default=1024,
@@ -198,13 +198,13 @@ def _run_sensitivity_analysis(args, search, df_train, df_val) -> None:
     Lance l'analyse de sensibilité hiérarchique (Sobol + Morris) sur la
     configuration trouvée par la recherche, à la suite de celle-ci.
     Protocole RÉDUIT et DISTINCT de la recherche (n_epochs_eval/n_windows_eval
-    par défaut 5/10 000, jamais confondu avec 10/50 000) — cf. sensitivity_analysis.py.
+    par défaut 5/10 000, jamais confondu avec 10/50 000)  cf. sensitivity_analysis.py.
     Ne fait jamais échouer le run principal : toute erreur est journalisée puis
     ignorée (la recherche et ses artefacts restent valides sans elle).
     """
     best_config_path = os.path.join(search.scratch_dir, "heuristic_best_config.json")
     if not os.path.exists(best_config_path):
-        print("\n[avertissement] heuristic_best_config.json introuvable — "
+        print("\n[avertissement] heuristic_best_config.json introuvable  "
              "analyse de sensibilité ignorée (aucun individu valide trouvé ?).")
         return
 
@@ -222,7 +222,7 @@ def _run_sensitivity_analysis(args, search, df_train, df_val) -> None:
         max_workers=args.sensitivity_max_workers,
         scratch_dir=search.scratch_dir, seed=args.seed,
         # Même bascule que la recherche elle-même (attribut d'instance sérialisé
-        # vers les workers ProcessPoolExecutor — fonctionne en séquentiel ET en
+        # vers les workers ProcessPoolExecutor  fonctionne en séquentiel ET en
         # parallèle, contrairement à un monkeypatch de fonction module-level qui
         # ne serait pas vu par des processus enfants réimportant le module).
         enable_latency_penalty=args.enable_latency_penalty,
@@ -249,7 +249,7 @@ def _run_sensitivity_analysis(args, search, df_train, df_val) -> None:
         print(f"\nAnalyse de sensibilité terminée -> sensitivity_rankings.json, "
              f"sensitivity_report.md, morris_results.json, sobol_results.json "
              f"dans {search.scratch_dir}")
-    except Exception as exc:   # noqa: BLE001 — n'invalide jamais la recherche elle-même
+    except Exception as exc:   # noqa: BLE001  n'invalide jamais la recherche elle-même
         print(f"  [avertissement] analyse de sensibilité échouée : {exc}")
 
 
@@ -299,7 +299,7 @@ def main(argv=None) -> int:
     try:
         search.export_top5()
         search.plot_convergence()
-    except Exception as exc:   # noqa: BLE001 — ne jamais faire échouer le run pour de la restitution
+    except Exception as exc:   # noqa: BLE001  ne jamais faire échouer le run pour de la restitution
         print(f"  [avertissement] export top5/plot_convergence : {exc}")
 
     if args.run_sensitivity:
@@ -309,7 +309,7 @@ def main(argv=None) -> int:
         try:
             import results_export
             rc = results_export.main(["--output_dir", search.scratch_dir, "--format", "all"])
-            print(f"results_export terminé (code {rc}) — voir {search.scratch_dir}")
+            print(f"results_export terminé (code {rc})  voir {search.scratch_dir}")
         except Exception as exc:   # noqa: BLE001
             print(f"  [avertissement] results_export a échoué : {exc}")
 
