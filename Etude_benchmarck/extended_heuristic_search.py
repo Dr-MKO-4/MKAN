@@ -295,27 +295,33 @@ ESPACE_CONDITIONNEL.update({
 })
 
 
-def hidden_size_gru_adjusted(hidden_size: int) -> int:
+def hidden_size_gru_adjusted(hidden_size: int, input_size: int) -> int:
     """
-    d_h^GRU = floor((4/3) * d_h)  (eq. ajustement_iso, section
-    "Égalisation du budget paramétrique").
+    d_h^GRU : résout l'égalité exacte du budget de paramètres entre une
+    GRUKANCell (3 portes) et une TKANCell/LSTM-KAN de référence (4 portes),
+    DÉLÈGUE à match_gru_hidden_size() (gru_cell.py).
 
-    3*d_h^GRU*(d_in+1) = 4*d_h*(d_in+1)  =>  d_h^GRU = (4/3)*d_h (ratio exact,
-    eq. ajustement_exact) ; la troncature directe vers l'entier inférieur
-    garantit P_GRU <= P_LSTM tout en restant la valeur entière la plus proche
-    de ce budget parmi celles qui satisfont cette contrainte.
-
-    CORRECTIF (ex-version de step_2_search_extension_and_analysis.tex utilisait
-    floor(sqrt(4/3)*d_h) ≈ floor(1.1547*d_h), présentée comme une "approximation
-    conservative couramment adoptée dans la littérature"  cette justification ne
-    correspondait à aucune pratique documentée et sous-budgétait la GRUKANCell de
-    ~16% par rapport à la troncature directe de 4/3 (erreur mathématique confirmée
-    et corrigée dans le document de référence). Le dépôt possède par ailleurs
-    match_gru_hidden_size() (gru_cell.py), qui résout l'égalité paramétrique exacte
-    par porte  différente de cette formule fermée  utilisée par le protocole
-    Niveau 1 (niveau1_harness.py) ; on ne la modifie pas.
+    CORRECTIF (2026-10-01) : cette fonction utilisait auparavant l'approximation
+    fermée d_h^GRU = floor((4/3)*d_h), dérivée en supposant à tort que le nombre
+    de paramètres d'une porte scale linéairement en d_h seul (modèle
+    P ~ d_h*(d_in+1), traitant le terme d'entrée concaténée comme une constante
+    ~d_in+1 indépendante de d_h). En réalité, GenericKANLayer construit chaque
+    porte avec in_features = input_size + hidden_size (cf. gru_cell.py::
+    _make_gate, concat_size = input_size + hidden_size), donc le nombre de
+    paramètres d'une porte scale en (d_in+h)*h -- un terme réellement quadratique
+    en h, pas linéaire. L'approximation 4/3 n'est valide que si d_in >> h ; ici
+    c'est l'inverse (d_in=8-12, h=32-128+), ce qui lui faisait SURESTIMER
+    fortement h_GRU : pour d_in=8, h_LSTM=128, l'ancienne formule donnait
+    floor(170.67)=170, qui porte en réalité ~30% de paramètres de PLUS que la
+    LSTM-KAN de référence (3*170*(8+170)=90780 contre 4*128*(8+128)=69632),
+    au lieu d'un budget égal. La résolution quadratique exacte donne h~=148
+    pour ce cas. Ancien historique : une version antérieure utilisait
+    floor(sqrt(4/3)*d_h), elle-même déjà reconnue erronée et remplacée par le
+    4/3 direct -- les deux formules fermées partageaient la même hypothèse de
+    scaling linéaire invalide ; seule la résolution quadratique de
+    match_gru_hidden_size() est correcte et doit être utilisée.
     """
-    return math.floor((4.0 / 3.0) * hidden_size)
+    return match_gru_hidden_size(input_size, hidden_size)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -469,7 +475,7 @@ def build_model_from_individual(individual: dict, input_size: int) -> torch.nn.M
     if individual["Cell_Type"] == "TKANCell":
         return ConfigurableMKANScorer(input_size, hidden_size,
                                        gate_bases=gate_bases, gate_kwargs=gate_kwargs)
-    h_gru = hidden_size_gru_adjusted(hidden_size)
+    h_gru = hidden_size_gru_adjusted(hidden_size, input_size)
     return GRUMKANScorer(input_size, h_gru,
                           gate_bases=gate_bases, gate_kwargs=gate_kwargs)
 
@@ -585,6 +591,29 @@ def _penalty_latency(latency_ms: float, alpha_lat: float = 10.0) -> float:
 # ══════════════════════════════════════════════════════════════════════════
 
 LATENCY_CONSTRAINT_MS = 100.0   # seuil USSD du protocole  inchangé
+
+# ══════════════════════════════════════════════════════════════════════════
+# Poids AHP (Analytic Hierarchy Process, Saaty 1980) du scalaire de départage
+# fitness_total -- vecteur propre principal de la matrice de comparaison par
+# paires documentée dans step_2_search_extension_and_analysis.tex
+# ("Calibration des pondérations par AHP"), lambda_max=5.0364,
+# CI=(lambda_max-5)/4=0.0091, CR=CI/1.12=0.0081 (<<0.10, jugements cohérents).
+#
+# CORRECTIF (2026-10-01) : ce fichier utilisait auparavant les poids
+# "arrondis à deux décimales" (0.40/0.25/0.15/0.10/0.10) documentés dans
+# step_2.tex. Ce ne sont PAS les valeurs arrondies au centième le plus proche
+# du vecteur propre réel (qui donnerait 0.41/0.26/0.15/0.09/0.09) mais des
+# valeurs ajustées à la main vers des multiples de 0.05, avec des écarts
+# jusqu'à 0.0147 par composante -- un choix de lisibilité, pas une erreur de
+# calcul, mais qui s'écarte empiriquement du résultat AHP exact. Sur demande
+# explicite (ne pas introduire de valeurs approximatives qui faussent le
+# résultat empirique), ce fichier utilise désormais directement le vecteur
+# propre non arrondi.
+AHP_WEIGHT_MCC = 0.4147
+AHP_WEIGHT_PR_AUC = 0.2573
+AHP_WEIGHT_BRIER = 0.1529
+AHP_WEIGHT_R2_SYMBOLIC = 0.0876
+AHP_WEIGHT_LATENCY_PENALTY = 0.0876
 
 
 def _objective_vector(fitness_components: dict) -> tuple:
@@ -813,8 +842,12 @@ def compute_fitness(
 ) -> dict:
     """
     Fitness scientifique de l'Étape 2 (section 3) :
-        Fitness = 0.40*max(0,MCC) + 0.25*PR_AUC - 0.15*Brier
-                 + 0.10*R2_symbolic - 0.10*penalty_latency
+        Fitness = AHP_WEIGHT_MCC*max(0,MCC) + AHP_WEIGHT_PR_AUC*PR_AUC
+                 - AHP_WEIGHT_BRIER*Brier + AHP_WEIGHT_R2_SYMBOLIC*R2_symbolic
+                 - AHP_WEIGHT_LATENCY_PENALTY*penalty_latency
+        soit, aux valeurs non arrondies du vecteur propre AHP :
+        Fitness = 0.4147*max(0,MCC) + 0.2573*PR_AUC - 0.1529*Brier
+                 + 0.0876*R2_symbolic - 0.0876*penalty_latency
 
     Args:
         config          : individu validé (cf. sample_individual/validate_individual)
@@ -982,8 +1015,9 @@ def compute_fitness(
         # sa contribution à fitness_total est conditionnelle à enable_latency_penalty.
         penalty_lat_applied = penalty_lat if enable_latency_penalty else 0.0
         fitness_total = (
-            0.40 * mcc_clipped + 0.25 * pr_auc - 0.15 * brier
-            + 0.10 * r2_symbolic - 0.10 * penalty_lat_applied
+            AHP_WEIGHT_MCC * mcc_clipped + AHP_WEIGHT_PR_AUC * pr_auc
+            - AHP_WEIGHT_BRIER * brier + AHP_WEIGHT_R2_SYMBOLIC * r2_symbolic
+            - AHP_WEIGHT_LATENCY_PENALTY * penalty_lat_applied
         )
 
         components = {
@@ -995,7 +1029,7 @@ def compute_fitness(
             "fitness_total": _safe_float(fitness_total, default=-10.0),
         }
         n_params = sum(p.numel() for p in model.parameters())
-        h_gru = (hidden_size_gru_adjusted(int(config["hidden_size"]))
+        h_gru = (hidden_size_gru_adjusted(int(config["hidden_size"]), input_size)
                  if config["Cell_Type"] == "GRUKANCell" else None)
 
         return {
@@ -1334,6 +1368,45 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                     else:
                         gate_cfg[name] = rng.choice(domain)
         return mutant
+
+    # ── Génération des enfants (section 6) ──────────────────────────────────
+
+    def _generer_enfants(self, parents: list, freq: dict = None) -> list:
+        """
+        Redéfinition NSGA-II de RechercheHeuristique._generer_enfants() :
+        identique en logique (croisement + mutation, puis EDA si freq fourni),
+        mais tire les paires de parents via self._rng.sample() au lieu de
+        random.sample() (module global).
+
+        CORRECTIF (2026-10-01) : la version héritée utilisait random.sample
+        pour choisir quelle paire de parents produit chaque enfant, alors que
+        tout le reste du tirage aléatoire propre à ExtendedHeuristicSearch
+        (_croiser_un, _muter, _generer_depuis_eda, _tournoi) passe par
+        self._rng -- en contradiction avec le commentaire de _tournoi qui
+        affirmait (à tort) que seule la sélection par tournoi restait sur le
+        générateur global avant sa propre redéfinition. Seul self._rng.getstate()
+        est sauvegardé/restauré au checkpoint (aucun random.getstate() dans ce
+        fichier) : sans cette redéfinition, une reprise ne rejouait pas
+        exactement le même pairage parent/parent qu'une exécution continue.
+        """
+        n_enfants = self.taille_pop - self.elite_size
+        n_eda     = (n_enfants // 3) if freq is not None else 0
+        n_cross   = n_enfants - n_eda
+
+        enfants = []
+        while len(enfants) < n_cross:
+            p1, p2 = self._rng.sample(parents, 2)
+            e1, e2 = self._croiser(p1, p2)
+            enfants.append(self._muter(e1))
+            if len(enfants) < n_cross:
+                enfants.append(self._muter(e2))
+        enfants = enfants[:n_cross]
+
+        if freq is not None:
+            for _ in range(n_eda):
+                enfants.append(self._generer_depuis_eda(freq))
+
+        return enfants[:n_enfants]
 
     # ── EDA (section 6) ───────────────────────────────────────────────────────
 
@@ -2075,10 +2148,27 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
     # ── Export Top 5 (section 13) ────────────────────────────────────────────
 
     def export_top5(self, path: Optional[str] = None) -> list:
+        """
+        CORRECTIF (2026-10-01) : classait auparavant par le score scalaire
+        pondéré seul (df.sort_values("score")), sans jamais appeler
+        _fast_non_dominated_sort/_constrained_dominates -- un individu violant
+        la contrainte de latence (>100 ms) pouvait donc figurer dans le top 5
+        si son score scalaire compensait, en contradiction avec la doctrine de
+        dominance contrainte documentée partout ailleurs dans ce fichier
+        (cf. _constrained_dominates, export_pareto_front). Classe désormais par
+        (rang de front, crowding décroissant) sur les individus uniques et
+        valides de l'historique, le score scalaire ne servant plus qu'à
+        l'affichage/traçabilité -- cohérent avec export_pareto_front et avec
+        l'usage du scalaire en simple départage documenté en section 9.
+        """
         path = path or os.path.join(self.scratch_dir, "top5_configs.json")
-        df = self.history.sort_values("score", ascending=False)
-        seen, top = set(), []
+        df = self.history
+
+        seen, rows = set(), []
         for _, row in df.iterrows():
+            comp = row.get("_fitness_components")
+            if not isinstance(comp, dict):
+                continue
             ind = {k: row[k] for k in
                   ("Cell_Type", "Input_Regime", "hidden_size", "lr", "lam", "mu1", "mu2",
                    "batch_size", "W", "gates")}
@@ -2086,9 +2176,28 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             if key in seen:
                 continue
             seen.add(key)
-            top.append({"individual": ind, "score": row["score"], "generation": int(row["generation"])})
-            if len(top) == 5:
-                break
+            rows.append({"individual": ind, "score": row["score"],
+                        "generation": int(row["generation"]), "components": comp})
+
+        if not rows:
+            top = []
+        else:
+            objs = [_objective_vector(r["components"]) for r in rows]
+            cvs  = [_constraint_violation(r["components"]) for r in rows]
+            fronts = _fast_non_dominated_sort(objs, cvs)
+            ordered_idx = []
+            for front in fronts:
+                cd = _crowding_distance([objs[k] for k in front])
+                ranked = sorted(zip(front, cd), key=lambda t: -t[1])
+                ordered_idx.extend(i for i, _ in ranked)
+
+            top = []
+            for i in ordered_idx[:5]:
+                r = rows[i]
+                top.append({"individual": r["individual"], "score": r["score"],
+                           "generation": r["generation"],
+                           "constraint_violation_ms": cvs[i]})
+
         with open(path, "w", encoding="utf-8") as f:
             json.dump(top, f, indent=2, ensure_ascii=False, default=str)
         return top

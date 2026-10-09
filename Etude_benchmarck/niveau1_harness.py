@@ -23,10 +23,11 @@ d'exécution du protocole (§8) doit appeler une fois par configuration.
 """
 
 import argparse
+import hashlib
 import json
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -38,7 +39,12 @@ from lstm_cell import ConfigurableMKANScorer
 from gru_cell import GRUMKANScorer, match_gru_hidden_size
 
 import sys, os
-sys.path.insert(0, os.path.abspath(".."))
+# Dossier MKAN/ (parent de ce fichier), PAS os.path.abspath("..") : ce dernier
+# depend du dossier courant au lancement et casse l'import de loss.py si le
+# script n'est pas lance depuis MKAN/Etude_benchmarck.
+_MKAN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _MKAN_DIR not in sys.path:
+    sys.path.insert(0, _MKAN_DIR)
 from loss import mkan_total_loss   # noqa: E402
 
 
@@ -174,6 +180,9 @@ class RunConfig:
     seed:        int = 0
     max_accounts: Optional[int] = None   # sous-échantillonnage (smoke test)
     device:      str = "cpu"
+    # None = comportement historique (pas de clipping). Etape 2
+    # (extended_heuristic_search.compute_fitness) utilisait max_norm=1.0.
+    clip_grad_norm: Optional[float] = None
 
 
 def _get_device(name: str):
@@ -183,8 +192,49 @@ def _get_device(name: str):
     return torch.device(name)
 
 
+def build_windows_sampled(df: pd.DataFrame, W: int, feature_cols: list,
+                          max_accounts: Optional[int] = None,
+                          n_max: Optional[int] = None, seed: int = 42):
+    """Version vectorisee de build_windows + tirage de n_max fenetres.
+
+    Memes fenetres, meme ordre global (compte puis pas de temps) que
+    build_windows, et meme tirage que extended_heuristic_search.compute_fitness
+    (rng(seed).choice(total, n_max, replace=False), indices tries) -- mais
+    seules les fenetres RETENUES sont materialisees : sur 16 M de lignes,
+    build_windows construit d'abord ~16 M fenetres (boucle Python, ~10 Go de
+    RAM pour W=10) pour n'en garder que 50 000."""
+    df = df.sort_values([ACCOUNT_COL, TIME_COL], kind="mergesort").reset_index(drop=True)
+    feat = df[feature_cols].to_numpy(dtype=np.float32)
+    targ = df[TARGET_COL].to_numpy(dtype=np.float32)
+    acct = df[ACCOUNT_COL].to_numpy()
+
+    _, starts = np.unique(acct, return_index=True)
+    ends = np.append(starts[1:], len(acct))
+    if max_accounts is not None:
+        starts, ends = starts[:max_accounts], ends[:max_accounts]
+    n_win = np.maximum(ends - starts - W + 1, 0)
+    total = int(n_win.sum())
+    if total == 0:
+        return (np.zeros((0, W, len(feature_cols)), dtype=np.float32),
+                np.zeros((0,), dtype=np.float32), 0)
+
+    if n_max and total > n_max:
+        g = np.sort(np.random.default_rng(seed).choice(total, n_max, replace=False))
+    else:
+        g = np.arange(total)
+    cum = np.cumsum(n_win)                                   # fin (exclusive) par compte
+    acc_idx = np.searchsorted(cum, g, side="right")          # compte de chaque fenetre
+    win_start = starts[acc_idx] + (g - (cum[acc_idx] - n_win[acc_idx]))
+    X = feat[win_start[:, None] + np.arange(W)]              # (n, W, n_features)
+    y = targ[win_start + W - 1]                              # etiquette du dernier pas
+    return X, y, total
+
+
 def load_and_window(train_path: str, val_path: str, regime: str, W: int,
-                     max_accounts: Optional[int] = None) -> dict:
+                     max_accounts: Optional[int] = None,
+                     n_windows_train: Optional[int] = None,
+                     n_windows_val: Optional[int] = None,
+                     sample_seed: int = 42) -> dict:
     """Isole la partie COUTEUSE et INDEPENDANTE des choix de bases/graine de
     run_config (lecture parquet, construction du regime, standardisation,
     fenetrage par compte) : ne depend que de (regime, W). Un appelant qui
@@ -204,8 +254,14 @@ def load_and_window(train_path: str, val_path: str, regime: str, W: int,
     stats = standardize(df_train, feature_cols)
     standardize(df_val, feature_cols, stats=stats)
 
-    X_train, y_train = build_windows(df_train, W, feature_cols, max_accounts)
-    X_val,   y_val   = build_windows(df_val,   W, feature_cols, max_accounts)
+    X_train, y_train, n_train_full = build_windows_sampled(
+        df_train, W, feature_cols, max_accounts, n_windows_train, sample_seed)
+    del df_train
+    X_val, y_val, n_val_full = build_windows_sampled(
+        df_val, W, feature_cols, max_accounts, n_windows_val, sample_seed + 1)
+    del df_val
+    print(f"[donnees] regime={regime} W={W} : train {len(X_train):,}/{n_train_full:,} "
+          f"fenetres, val {len(X_val):,}/{n_val_full:,} fenetres", flush=True)
 
     return {
         "X_train_t": torch.from_numpy(X_train), "y_train_t": torch.from_numpy(y_train),
@@ -214,9 +270,39 @@ def load_and_window(train_path: str, val_path: str, regime: str, W: int,
     }
 
 
+def _cfg_fingerprint(cfg: RunConfig, n_train: int) -> str:
+    """Identifie un run independamment du device (un checkpoint pris sur MPS
+    reste valable sur CPU) : refuse de reprendre un checkpoint d'une autre
+    configuration ou d'un autre jeu d'entrainement."""
+    d = asdict(cfg)
+    d.pop("device", None)
+    d["n_train_windows"] = int(n_train)
+    return hashlib.sha256(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _atomic_torch_save(obj, path: str) -> None:
+    """Ecrit dans un fichier temporaire puis os.replace : un crash PENDANT la
+    sauvegarde ne corrompt jamais le dernier checkpoint valide."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    tmp = path + ".tmp"
+    torch.save(obj, tmp)
+    os.replace(tmp, path)
+
+
 def run_config(cfg: RunConfig, train_path: str, val_path: str,
-               return_model: bool = False, precomputed: Optional[dict] = None) -> dict:
+               return_model: bool = False, precomputed: Optional[dict] = None,
+               checkpoint_path: Optional[str] = None,
+               checkpoint_every_s: float = 600.0,
+               eval_batch_size: int = 4096,
+               return_scores: bool = False) -> dict:
     """Entraîne UNE configuration et rapporte les métriques (protocole §5).
+
+    checkpoint_path : si fourni, l'etat complet (modele, optimiseur, RNG,
+    epoque, position dans l'epoque, permutation) est sauvegarde toutes les
+    checkpoint_every_s secondes ET a chaque fin d'epoque ; un nouvel appel
+    avec le meme chemin reprend exactement la ou le run s'etait arrete.
+    eval_batch_size : taille des lots de validation (evite l'OOM).
+    return_scores : ajoute "_val_scores" (np.ndarray) aux metriques.
 
     precomputed : resultat de load_and_window(..., cfg.regime, cfg.W,
     cfg.max_accounts), reutilisable tel quel pour tout run PARTAGEANT le meme
@@ -250,41 +336,136 @@ def run_config(cfg: RunConfig, train_path: str, val_path: str,
 
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr)
     n = X_train_t.shape[0]
+    n_batches = math.ceil(n / cfg.batch_size)
+
+    # ── Reprise depuis un checkpoint intra-run (crash, coupure, Ctrl+C) ──────
+    start_epoch, start_batch, perm = 0, 0, None
+    loss_history, train_time_before = [], 0.0
+    resumed_loss = None   # (somme des pertes, nb de batches) de l'epoque en cours
+    fingerprint = _cfg_fingerprint(cfg, n)
+    ck = None
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        try:
+            ck = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        except Exception as exc:   # noqa: BLE001
+            tqdm.write(f"  [checkpoint illisible, ignore] {checkpoint_path} : {exc}")
+    if ck is not None:
+        if ck.get("fingerprint") == fingerprint:
+            model.load_state_dict(ck["model"])
+            opt.load_state_dict(ck["optimizer"])
+            torch.set_rng_state(ck["torch_rng"])
+            np.random.set_state(ck["numpy_rng"])
+            start_epoch, start_batch = ck["epoch"], ck["batch"]
+            perm = ck["perm"]
+            if start_batch > 0:
+                resumed_loss = (ck.get("epoch_loss_sum", 0.0), ck.get("epoch_n_seen", 0))
+            loss_history = ck["loss_history"]
+            train_time_before = ck["train_time_s"]
+            tqdm.write(f"  [reprise checkpoint] epoque {start_epoch + 1}/{cfg.epochs}, "
+                       f"batch {start_batch}/{n_batches} ({checkpoint_path})")
+        else:
+            tqdm.write(f"  [checkpoint ignore] configuration differente : {checkpoint_path}")
+
+    def _save_checkpoint(epoch, batch, perm_, loss_sum_=0.0, n_seen_=0):
+        if not checkpoint_path:
+            return
+        _atomic_torch_save({
+            "fingerprint": fingerprint,
+            "model": model.state_dict(), "optimizer": opt.state_dict(),
+            "torch_rng": torch.get_rng_state(), "numpy_rng": np.random.get_state(),
+            "epoch": epoch, "batch": batch, "perm": perm_,
+            "epoch_loss_sum": float(loss_sum_), "epoch_n_seen": int(n_seen_),
+            "loss_history": loss_history,
+            "train_time_s": train_time_before + (time.time() - t0),
+        }, checkpoint_path)
 
     t0 = time.time()
-    n_batches = math.ceil(n / cfg.batch_size)
-    epoch_pbar = tqdm(range(cfg.epochs), desc="epoques", unit="ep", leave=False)
-    for epoch in epoch_pbar:
-        perm = torch.randperm(n)
-        # leave=False : imbriquee sous epoch_pbar (elle-meme imbriquee sous la
-        # barre exterieure du plan de croisement, niveau1_benchmark_run.py) --
-        # le nombre de batches par epoque (n windows / batch_size) est souvent
-        # bien plus grand que le nombre d'epoques, donc c'est ICI que la
-        # visibilite de progression compte le plus.
-        batch_pbar = tqdm(range(0, n, cfg.batch_size), total=n_batches,
-                           desc=f"epoque {epoch + 1}/{cfg.epochs}", unit="batch",
-                           leave=False, mininterval=0.3)
-        last_loss = None
-        for i in batch_pbar:
-            idx = perm[i:i + cfg.batch_size]
-            xb = X_train_t[idx].to(device)
-            yb = y_train_t[idx].to(device)
-            opt.zero_grad()
-            loss_total, loss_pred, reg_l1, reg_entropy = mkan_total_loss(
-                model, xb, yb, lam=cfg.lam, mu1=cfg.mu1, mu2=cfg.mu2)
-            loss_total.backward()
-            opt.step()
-            last_loss = loss_total.item()
-            batch_pbar.set_postfix_str(f"loss={last_loss:.4f}")
-        epoch_pbar.set_postfix_str(f"loss={last_loss:.4f}" if last_loss is not None else "")
-    train_time = time.time() - t0
+    last_ck = time.time()
+    model.train()
+    in_epoch = False   # True entre le debut et la fin d'une epoque (Ctrl+C)
+    try:
+        epoch_pbar = tqdm(range(start_epoch, cfg.epochs), desc="epoques", unit="ep",
+                          leave=False, initial=start_epoch, total=cfg.epochs)
+        for epoch in epoch_pbar:
+            if perm is None:
+                perm = torch.randperm(n)
+            b0 = start_batch if epoch == start_epoch else 0
+            # Accumulation en tenseur : pas de .item() a chaque batch (synchro
+            # GPU/MPS systematique = ralentissement majeur sur des millions de pas).
+            if epoch == start_epoch and resumed_loss is not None:
+                loss_sum = torch.tensor(resumed_loss[0], device=device)
+                n_seen = resumed_loss[1]
+            else:
+                loss_sum = torch.zeros((), device=device)
+                n_seen = 0
+            next_b = b0
+            in_epoch = True
+            batch_pbar = tqdm(range(b0, n_batches), total=n_batches, initial=b0,
+                              desc=f"epoque {epoch + 1}/{cfg.epochs}", unit="batch",
+                              leave=False, mininterval=1.0)
+            for b in batch_pbar:
+                idx = perm[b * cfg.batch_size:(b + 1) * cfg.batch_size]
+                xb = X_train_t[idx].to(device, non_blocking=True)
+                yb = y_train_t[idx].to(device, non_blocking=True)
+                opt.zero_grad(set_to_none=True)
+                loss_total, _, _, _ = mkan_total_loss(
+                    model, xb, yb, lam=cfg.lam, mu1=cfg.mu1, mu2=cfg.mu2)
+                loss_total.backward()
+                if cfg.clip_grad_norm:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=cfg.clip_grad_norm)
+                opt.step()
+                loss_sum = loss_sum + loss_total.detach().reshape(())
+                n_seen += 1
+                next_b = b + 1
+                if n_seen % 200 == 0:
+                    avg = (loss_sum / n_seen).item()
+                    if not math.isfinite(avg):
+                        raise RuntimeError(f"loss NaN/Inf a l'epoque {epoch + 1}, batch {b}")
+                    batch_pbar.set_postfix_str(f"loss={avg:.4f}")
+                if checkpoint_path and time.time() - last_ck >= checkpoint_every_s:
+                    ls = loss_sum.item()
+                    # Jamais de checkpoint d'un etat NaN : sinon chaque relance
+                    # repartirait de poids corrompus et echouerait indefiniment.
+                    if not math.isfinite(ls):
+                        raise RuntimeError(f"loss NaN/Inf a l'epoque {epoch + 1}, batch {b}")
+                    _save_checkpoint(epoch, b + 1, perm, ls, n_seen)
+                    last_ck = time.time()
+            epoch_loss = (loss_sum / max(1, n_seen)).item()
+            if not math.isfinite(epoch_loss):
+                raise RuntimeError(f"loss NaN/Inf a la fin de l'epoque {epoch + 1}")
+            loss_history.append(epoch_loss)
+            epoch_pbar.set_postfix_str(f"loss={epoch_loss:.4f}")
+            in_epoch = False
+            perm = None
+            _save_checkpoint(epoch + 1, 0, None)
+            last_ck = time.time()
+    except KeyboardInterrupt:
+        # Ctrl+C : les poids correspondent a tous les batches deja faits, on
+        # sauvegarde donc la position reelle (pas celle du dernier checkpoint).
+        if checkpoint_path and in_epoch and math.isfinite(loss_sum.item()):
+            _save_checkpoint(epoch, next_b, perm, loss_sum.item(), n_seen)
+            tqdm.write(f"  [interruption] checkpoint sauvegarde : {checkpoint_path}")
+        raise
+    train_time = train_time_before + (time.time() - t0)
 
     n_params = sum(p.numel() for p in model.parameters())
 
+    # ── Validation PAR LOTS : un seul forward sur des millions de fenetres
+    #    sature la RAM/VRAM (cause du crash apres entrainement). ──────────────
     model.eval()
-    with torch.no_grad():
-        X_val_t = torch.from_numpy(X_val).to(device)
-        scores = model(X_val_t).cpu().numpy() if len(X_val) > 0 else np.array([])
+    scores = np.array([], dtype=np.float32)
+    if len(X_val) > 0:
+        parts = []
+        with torch.no_grad():
+            for s in tqdm(range(0, len(X_val), eval_batch_size), desc="validation",
+                          unit="lot", leave=False):
+                xb = torch.from_numpy(X_val[s:s + eval_batch_size]).to(device)
+                parts.append(model(xb).float().cpu().numpy())
+        scores = np.concatenate(parts)
+        n_bad = int((~np.isfinite(scores)).sum())
+        if n_bad:
+            tqdm.write(f"  [avertissement] {n_bad}/{len(scores)} scores NaN/Inf en validation")
+        scores = np.nan_to_num(scores, nan=0.5, posinf=1.0, neginf=0.0).clip(0.0, 1.0)
 
     metrics = compute_metrics(y_val, scores) if len(X_val) > 0 else {}
     metrics.update({
@@ -292,7 +473,10 @@ def run_config(cfg: RunConfig, train_path: str, val_path: str,
         "train_time_s": train_time,
         "n_train_windows": int(n),
         "n_val_windows": int(len(X_val)),
+        "loss_history": loss_history,
     })
+    if return_scores:
+        metrics["_val_scores"] = scores
     if return_model:
         # Prefixe "_" : champs non serialisables (nn.Module, tenseurs) a retirer
         # par l'appelant avant tout json.dump -- reserves au calcul, dans le

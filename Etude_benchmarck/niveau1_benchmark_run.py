@@ -59,9 +59,16 @@ wavkan_morlet), le budget_kwargs iso B=12 de BASIS_REGISTRY sert de repli
 documente -- jamais invente, jamais silencieux (cf. CANDIDATE_KWARGS).
 
 Fitness (formule REELLE de l'Etape 2, reutilisee telle quelle, PAS la version
-tronquee sans R2_symbolic proposee initialement) :
-    fitness_total = 0.40*max(0,MCC) + 0.25*PR_AUC - 0.15*Brier
-                    + 0.10*R2_symbolic - 0.10*penalty_latence
+tronquee sans R2_symbolic proposee initialement). CORRECTIF (2026-10-01) :
+utilise desormais le vecteur propre AHP non arrondi (AHP_WEIGHT_*, importes
+depuis extended_heuristic_search.py) au lieu des poids arrondis a des
+multiples de 0.05 utilises precedemment :
+    fitness_total = AHP_WEIGHT_MCC*max(0,MCC) + AHP_WEIGHT_PR_AUC*PR_AUC
+                    - AHP_WEIGHT_BRIER*Brier
+                    + AHP_WEIGHT_R2_SYMBOLIC*R2_symbolic
+                    - AHP_WEIGHT_LATENCY_PENALTY*penalty_latence
+    soit, aux valeurs numeriques : 0.4147*max(0,MCC) + 0.2573*PR_AUC
+                    - 0.1529*Brier + 0.0876*R2_symbolic - 0.0876*penalty_latence
 
 Usage :
     python niveau1_benchmark_run.py
@@ -88,7 +95,9 @@ if _ETUDE_DIR not in sys.path:
 
 from niveau1_harness import RunConfig, run_config, load_and_window, GRU_GATE_MAP  # noqa: E402
 from extended_heuristic_search import (                          # noqa: E402
-    _measure_latency_ms, _compute_r2_symbolic, _penalty_latency,
+    _measure_latency_ms, _compute_r2_symbolic, _penalty_latency, _release_device_memory,
+    AHP_WEIGHT_MCC, AHP_WEIGHT_PR_AUC, AHP_WEIGHT_BRIER,
+    AHP_WEIGHT_R2_SYMBOLIC, AHP_WEIGHT_LATENCY_PENALTY,
 )
 from edges import BASIS_REGISTRY                                  # noqa: E402
 
@@ -252,14 +261,24 @@ def compute_fitness_extras(metrics: dict, cell_type: str, W: int,
     r2_symbolic = _compute_r2_symbolic(model_cpu, x_pool)
     penalty_lat = _penalty_latency(latency_ms)
 
-    mcc = metrics.get("mcc", float("nan"))
-    mcc_clipped = max(0.0, mcc) if not math.isnan(mcc) else 0.0
-    pr_auc = metrics.get("auc_pr", 0.0) or 0.0
-    brier = metrics.get("brier", 1.0) or 1.0
+    def _finite(x, default):
+        try:
+            x = float(x)
+        except (TypeError, ValueError):
+            return default
+        return x if math.isfinite(x) else default
+
+    mcc_clipped = max(0.0, _finite(metrics.get("mcc"), 0.0))
+    pr_auc = _finite(metrics.get("auc_pr"), 0.0)
+    # Ancien code : `metrics.get("brier", 1.0) or 1.0` transformait un Brier
+    # parfait (0.0) en 1.0 (pire valeur) ; un NaN passait tel quel.
+    brier = _finite(metrics.get("brier"), 1.0)
     penalty_applied = penalty_lat if enable_latency_penalty else 0.0
 
-    fitness_total = (0.40 * mcc_clipped + 0.25 * pr_auc - 0.15 * brier
-                      + 0.10 * r2_symbolic - 0.10 * penalty_applied)
+    fitness_total = (AHP_WEIGHT_MCC * mcc_clipped + AHP_WEIGHT_PR_AUC * pr_auc
+                      - AHP_WEIGHT_BRIER * brier
+                      + AHP_WEIGHT_R2_SYMBOLIC * r2_symbolic
+                      - AHP_WEIGHT_LATENCY_PENALTY * penalty_applied)
 
     metrics.update({
         "mcc_clipped": mcc_clipped,
@@ -275,9 +294,16 @@ def compute_fitness_extras(metrics: dict, cell_type: str, W: int,
 # Sauvegarde continue (meme convention que niveau0_benchmark_iso.py)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _run_signature(epochs, device_type) -> str:
-    payload = {"epochs": epochs, "device_type": device_type}
+def _run_signature(epochs, n_windows_train, n_windows_val) -> str:
+    """Le device n'en fait plus partie : avant, passer de mps a cpu (ou
+    l'inverse) rendait TOUS les runs deja termines invisibles a la reprise."""
+    payload = {"epochs": epochs, "n_windows_train": n_windows_train,
+               "n_windows_val": n_windows_val}
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+
+
+def _key_hash(key: str) -> str:
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
 
 def _load_jsonl(path: str) -> list:
@@ -287,8 +313,14 @@ def _load_jsonl(path: str) -> list:
     with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if line:
+            if not line:
+                continue
+            try:
                 rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                # derniere ligne tronquee par un crash pendant l'ecriture :
+                # on l'ignore au lieu de bloquer toute la reprise.
+                print(f"[avertissement] ligne illisible ignoree dans {path}")
     return rows
 
 
@@ -329,34 +361,31 @@ def main():
     parser.add_argument("--val_path", type=str,
                          default=os.path.join("..", "..", "data", "val_features.parquet"))
     parser.add_argument("--epochs", type=int, default=10,
-                         help="Valeur REELLE de l'Etape 2 (n_epochs_eval, extended_"
-                              "heuristic_search.py) : c'est le nombre d'epoques qui a "
-                              "reellement produit les poids de heuristic_best_config.json "
-                              "(MCC=0.9834, etc.) -- evaluate_best_on_full_validation() "
-                              "ne reentraine PAS ('AUCUN reentrainement ici', son propre "
-                              "docstring), elle ne fait que reevaluer les poids deja "
-                              "entraines a 10 epoques sur l'ensemble complet de validation. "
-                              "Aucune valeur '30 epoques' n'existe dans le pipeline reel.")
+                         help="Valeur REELLE de l'Etape 2 (n_epochs_eval).")
+    parser.add_argument("--n_windows_train", type=int, default=50_000,
+                         help="Fenetres d'entrainement tirees (graine fixe 42) -- 50 000 = "
+                              "n_windows_eval REEL de l'Etape 2 (compute_fitness), donc "
+                              "protocole identique a celui qui a produit theta_opt. 0 = "
+                              "toutes les fenetres (~16 M : >10 jours PAR run).")
+    parser.add_argument("--n_windows_val", type=int, default=0,
+                         help="Fenetres de validation (0 = toutes, evaluees par lots).")
     parser.add_argument("--n_seeds", type=int, default=5)
     parser.add_argument("--strategy", type=str, default="raw_first",
-                         choices=["raw_first", "full"],
-                         help="raw_first (defaut) : phase 1 sur raw seul (36 architectures "
-                              "x n_seeds), puis extension du Top --top_n_engineered vers "
-                              "engineered -- reduit le nombre de runs sans toucher epochs/"
-                              "graines/dataset (aucune perte de qualite par run), appuye sur "
-                              "le resultat deja observe raw > engineered (Etape 2, MCC 0.9834 "
-                              "vs 0.9559). 'full' : plan factoriel integral (36 x 2 x n_seeds), "
-                              "aucun angle mort mais nettement plus long.")
-    parser.add_argument("--top_n_engineered", type=int, default=3,
-                         help="Nombre d'architectures (meilleure fitness sur raw) etendues "
-                              "au regime engineered en strategie raw_first.")
+                         choices=["raw_first", "full"])
+    parser.add_argument("--top_n_engineered", type=int, default=3)
     parser.add_argument("--device", type=str, default="auto",
                          choices=["auto", "cpu", "mps", "cuda"])
     parser.add_argument("--enable_latency_penalty", action="store_true", default=True)
     parser.add_argument("--no_latency_penalty", dest="enable_latency_penalty",
                          action="store_false")
+    parser.add_argument("--checkpoint_every_min", type=float, default=10.0,
+                         help="Frequence des checkpoints INTRA-run (minutes).")
+    parser.add_argument("--clip_grad_norm", type=float, default=1.0,
+                         help="Clipping du gradient (1.0 = valeur de l'Etape 2 ; 0 = aucun).")
     parser.add_argument("--out_dir", type=str, default="step4_outputs")
-    parser.add_argument("--no_resume", action="store_true")
+    parser.add_argument("--no_resume", action="store_true",
+                         help="Repart de zero : l'ancien journal est ARCHIVE (renomme), "
+                              "jamais efface.")
     args = parser.parse_args()
 
     device = select_training_device(args.device)
@@ -364,15 +393,25 @@ def main():
 
     project_root = os.path.dirname(os.path.abspath(__file__))
     out_dir = os.path.join(project_root, args.out_dir)
-    os.makedirs(out_dir, exist_ok=True)
+    ckpt_dir = os.path.join(out_dir, "checkpoints")
+    model_dir = os.path.join(out_dir, "models")
+    scores_dir = os.path.join(out_dir, "val_scores")
+    for d in (out_dir, ckpt_dir, model_dir, scores_dir):
+        os.makedirs(d, exist_ok=True)
     train_path = os.path.join(project_root, args.train_path)
     val_path = os.path.join(project_root, args.val_path)
 
     progress_path = os.path.join(out_dir, "step4_progress.jsonl")
-    run_signature = _run_signature(args.epochs, device.type)
+    failures_path = os.path.join(out_dir, "step4_failures.jsonl")
+    n_train = args.n_windows_train or None
+    n_val = args.n_windows_val or None
+    run_signature = _run_signature(args.epochs, n_train, n_val)
 
     if args.no_resume and os.path.exists(progress_path):
-        open(progress_path, "w", encoding="utf-8").close()
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        archived = progress_path.replace(".jsonl", f"_archive_{stamp}.jsonl")
+        os.replace(progress_path, archived)
+        print(f"[no_resume] ancien journal archive : {archived}")
 
     completed = {}
     n_stale = 0
@@ -388,21 +427,43 @@ def main():
         print(f"[avertissement] {n_stale} ligne(s) de progression avec une signature "
               f"differente ignoree(s).")
 
+    run_meta = {"epochs": args.epochs, "n_seeds": args.n_seeds, "device": device.type,
+                "strategy": args.strategy, "n_windows_train": n_train,
+                "n_windows_val": n_val, "run_signature": run_signature,
+                "top_n_engineered": (args.top_n_engineered
+                                     if args.strategy == "raw_first" else None)}
+
+    def _refresh_reports():
+        # Rapport + graphiques regeneres apres CHAQUE run : un crash ulterieur
+        # ne fait jamais perdre ce qui est deja calcule. Ne doit jamais
+        # interrompre le benchmark.
+        try:
+            from niveau1_report import write_reports
+            write_reports(out_dir, run_signature=run_signature, metadata=run_meta,
+                          figures=True, export_png=False, quiet=True)
+        except Exception as exc:   # noqa: BLE001
+            tqdm.write(f"  [avertissement] generation du rapport echouee (ignoree) : {exc}")
+
     seeds = list(range(1, args.n_seeds + 1))
     archs = build_architecture_grid()
 
-    # Cache (regime_niveau1, W) -> donnees pre-fenetrees. Seules 4 combinaisons
-    # distinctes existent dans le plan (brut/W=5, brut/W=10, traite/W=5,
-    # traite/W=10 -- GRU=W=5 toujours, TKAN=W=10 toujours) : sans ce cache,
-    # niveau1_harness.run_config relirait le parquet et refenetrerait les
-    # comptes (boucle Python, le poste le plus couteux hors entrainement)
-    # jusqu'a 365 fois au lieu de 4 -- cf. docstring de load_and_window.
     _data_cache = {}
 
     def _get_precomputed(regime_niveau1: str, W: int) -> dict:
         key = (regime_niveau1, W)
         if key not in _data_cache:
-            _data_cache[key] = load_and_window(train_path, val_path, regime_niveau1, W)
+            data = load_and_window(train_path, val_path, regime_niveau1, W,
+                                   n_windows_train=n_train, n_windows_val=n_val)
+            np.save(os.path.join(scores_dir, f"y_val_{regime_niveau1}_W{W}.npy"), data["y_val"])
+            # Pool d'audit R2_symbolic : 256 fenetres de validation tirees au
+            # hasard (graine fixe, identiques pour tous les runs). Les 256
+            # PREMIERES fenetres (tri par compte) ne couvriraient que quelques
+            # comptes ; a l'Etape 2 elles venaient d'un sous-echantillon aleatoire.
+            n_pool = min(256, len(data["X_val"]))
+            pool_idx = np.sort(np.random.default_rng(0).choice(len(data["X_val"]), n_pool,
+                                                               replace=False))
+            data["x_audit_pool"] = torch.from_numpy(data["X_val"][pool_idx])
+            _data_cache[key] = data
         return _data_cache[key]
 
     def _run_point(point: dict) -> dict:
@@ -415,55 +476,97 @@ def main():
             epochs=args.epochs, lr=cell_theta["lr"], batch_size=cell_theta["batch_size"],
             lam=cell_theta["lam"], mu1=cell_theta["mu1"], mu2=cell_theta["mu2"],
             seed=point["seed"], device=device.type,
+            clip_grad_norm=args.clip_grad_norm or None,
         )
         precomputed = _get_precomputed(point["regime_niveau1"], cell_theta["W"])
+        h = _key_hash(point["key"])
+        ckpt_path = os.path.join(ckpt_dir, f"{h}.pt")
         t0 = time.time()
         metrics = run_config(cfg, train_path, val_path, return_model=True,
-                              precomputed=precomputed)
+                              precomputed=precomputed, checkpoint_path=ckpt_path,
+                              checkpoint_every_s=args.checkpoint_every_min * 60.0,
+                              return_scores=True)
+        scores = metrics.pop("_val_scores")
+        model = metrics["_model"]
+        # x_pool de R2_symbolic construit sur des fenetres de VALIDATION, comme
+        # extended_heuristic_search.compute_fitness -- l'ancien code prenait les
+        # fenetres d'ENTRAINEMENT (cf. _get_precomputed).
+        metrics["_X_train_pool"] = precomputed["x_audit_pool"]
+        # Sauvegardes AVANT le calcul latence/R2_symbolic : si celui-ci plante,
+        # le modele entraine n'est pas perdu (le checkpoint de fin d'entrainement
+        # permet aussi de reprendre sans reentrainer).
+        np.save(os.path.join(scores_dir, f"{h}.npy"), scores.astype(np.float32))
+        torch.save(model.state_dict(), os.path.join(model_dir, f"{h}.pt"))
         metrics = compute_fitness_extras(metrics, point["cell_type"], cell_theta["W"],
                                           args.enable_latency_penalty)
         metrics["wall_time_s"] = time.time() - t0
         return {
             "cell_type": point["cell_type"], "regime": point["regime"],
             "base_by_gate": point["base_by_gate"], "seed": point["seed"],
+            "key_hash": h, "y_val_file": f"y_val_{point['regime_niveau1']}_W{cell_theta['W']}.npy",
             "metrics": metrics,
         }
+
+    def _run_one(point: dict):
+        """Execute un point ; en cas d'echec, journalise et continue (le
+        checkpoint intra-run est conserve pour la prochaine relance)."""
+        try:
+            result = _run_point(point)
+        except KeyboardInterrupt:
+            tqdm.write("\n[interruption] arret demande -- relancez la meme commande "
+                       "pour reprendre (checkpoints conserves).")
+            raise
+        except Exception as exc:   # noqa: BLE001
+            import traceback
+            tqdm.write(f"  [ECHEC] {point['key']} : {exc!r} -- run suivant.")
+            _append_jsonl(failures_path, {
+                "run_signature": run_signature, "key": point["key"],
+                "error": repr(exc), "traceback": traceback.format_exc(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+            return None
+        finally:
+            _release_device_memory(device)
+        _append_jsonl(progress_path, {
+            "run_signature": run_signature, "key": point["key"], "result": result,
+        })
+        completed[point["key"]] = result
+        ckpt = os.path.join(ckpt_dir, f"{_key_hash(point['key'])}.pt")
+        if os.path.exists(ckpt):
+            os.remove(ckpt)
+        _refresh_reports()
+        return result
 
     def _run_grid(points: list, desc: str) -> list:
         for p in points:
             p["key"] = _point_key(p)
-        remaining = [p for p in points if p["key"] not in completed]
         out = [completed[p["key"]] for p in points if p["key"] in completed]
+        remaining = [p for p in points if p["key"] not in completed]
         pbar = tqdm(remaining, desc=desc, unit="run")
         for point in pbar:
             pbar.set_postfix_str(f"{point['cell_type']}/{point['regime']}/seed{point['seed']}")
-            result = _run_point(point)
-            _append_jsonl(progress_path, {
-                "run_signature": run_signature, "key": point["key"], "result": result,
-            })
-            completed[point["key"]] = result
-            out.append(result)
+            result = _run_one(point)
+            if result is not None:
+                out.append(result)
         return out
 
     from collections import defaultdict
 
+    def _mean_fitness_by_arch(rows, with_regime):
+        acc = defaultdict(list)
+        for r in rows:
+            arch = tuple(sorted(r["base_by_gate"].items()))
+            k = (r["cell_type"], r["regime"], arch) if with_regime else (r["cell_type"], arch)
+            acc[k].append(r["metrics"]["fitness_total"])
+        return {k: float(np.mean(v)) for k, v in acc.items()}
+
     if args.strategy == "full":
-        results = _run_grid(build_full_grid(seeds), "Etape 4 -- Niveau 1 (360 runs, factoriel integral)")
+        results = _run_grid(build_full_grid(seeds),
+                            f"Etape 4 -- Niveau 1 ({len(archs) * 2 * len(seeds)} runs)")
     else:
-        # raw_first : phase 1 sur raw uniquement (180 runs), puis extension du
-        # Top N (defaut 3) vers engineered (+15 runs pour N=3) -- reduit le
-        # nombre total de runs SANS toucher epochs/graines/taille du dataset
-        # (aucune perte de qualite par run), appuye sur le resultat DEJA
-        # observe empiriquement en Etape 2 (raw > engineered, MCC 0.9834 vs
-        # 0.9559) -- decision prise en cours de session apres mesure reelle
-        # du temps d'execution (365 runs factoriels trop longs en pratique).
         raw_results = _run_grid(build_regime_grid(archs, "raw", seeds),
-                                 "Etape 4 phase 1/2 -- raw (180 runs)")
-        raw_by_arch = defaultdict(list)
-        for r in raw_results:
-            arch_key = tuple(sorted(r["base_by_gate"].items()))
-            raw_by_arch[(r["cell_type"], arch_key)].append(r["metrics"]["fitness_total"])
-        raw_fitness = {k: float(np.mean(v)) for k, v in raw_by_arch.items()}
+                                 f"Etape 4 phase 1/2 -- raw ({len(archs) * len(seeds)} runs)")
+        raw_fitness = _mean_fitness_by_arch(raw_results, with_regime=False)
         top_archs_keys = sorted(raw_fitness, key=raw_fitness.get, reverse=True)[:args.top_n_engineered]
         top_archs = [{"cell_type": ct, "base_by_gate": dict(bg)} for ct, bg in top_archs_keys]
         print(f"[raw_first] Top {len(top_archs)} architectures (fitness raw) "
@@ -475,32 +578,17 @@ def main():
                                  f"({len(top_archs) * len(seeds)} runs)")
         results = raw_results + eng_results
 
-    # ── Meilleure architecture heterogene (fitness moyenne sur les 5 graines) ──
-    by_arch = defaultdict(list)
-    for r in results:
-        arch_key = (r["cell_type"], r["regime"],
-                    tuple(sorted(r["base_by_gate"].items())))
-        by_arch[arch_key].append(r["metrics"]["fitness_total"])
-    arch_fitness = {k: float(np.mean(v)) for k, v in by_arch.items()}
-    best_key = max(arch_fitness, key=arch_fitness.get)
-    best_cell_type, best_regime, best_bases = best_key
-    best_config = {
-        "cell_type": best_cell_type, "regime": best_regime,
-        "base_by_gate": dict(best_bases),
-        "fitness_mean_5_seeds": arch_fitness[best_key],
-        "n_seeds": len(seeds),
-    }
+    if not results:
+        print("Aucun run reussi -- voir", failures_path)
+        return
 
-    # ── Baseline MKAN uniforme (base "hybrid" -- Gaussienne+Fourier, eq. 4.13 --
-    # sur toutes les portes) : meme cell_type/regime que la meilleure architecture
-    # heterogene, 5 graines, POUR PERMETTRE UNE COMPARAISON A PROTOCOLE IDENTIQUE
-    # (memes hyperparametres theta_opt, meme regime, memes graines -- seule la
-    # composition des bases par porte differe).
+    # ── Baseline MKAN uniforme (hybrid sur toutes les portes), meme cellule /
+    #    regime / graines / theta_opt que la meilleure architecture heterogene.
+    arch_fitness = _mean_fitness_by_arch(results, with_regime=True)
+    best_cell_type, best_regime, _ = max(arch_fitness, key=arch_fitness.get)
     baseline_gate_names = (["Forget", "Input", "Candidate"] if best_cell_type == "gru"
                             else ["Forget", "Input", "Candidate", "Output"])
-    baseline_results = []
-    baseline_pbar = tqdm(seeds, desc="Baseline MKAN uniforme (hybrid)", unit="seed")
-    for seed in baseline_pbar:
+    for seed in tqdm(seeds, desc="Baseline MKAN uniforme (hybrid)", unit="seed"):
         b_point = {
             "cell_type": best_cell_type,
             "base_by_gate": {g: "hybrid" for g in baseline_gate_names},
@@ -508,78 +596,15 @@ def main():
             "seed": seed,
         }
         b_point["key"] = "baseline::" + _point_key(b_point)
-        if b_point["key"] in completed:
-            baseline_results.append(completed[b_point["key"]])
-            continue
-        result = _run_point(b_point)
-        _append_jsonl(progress_path, {
-            "run_signature": run_signature, "key": b_point["key"], "result": result,
-        })
-        baseline_results.append(result)
-    baseline_fitness_mean = float(np.mean([r["metrics"]["fitness_total"] for r in baseline_results]))
-    baseline_summary = {
-        "cell_type": best_cell_type, "regime": best_regime,
-        "base_by_gate": {g: "hybrid" for g in baseline_gate_names},
-        "fitness_mean_5_seeds": baseline_fitness_mean,
-        "gain_vs_baseline": arch_fitness[best_key] - baseline_fitness_mean,
-    }
+        if b_point["key"] not in completed:
+            _run_one(b_point)
 
-    results_path = os.path.join(out_dir, "step4_level1_results.json")
-    best_path = os.path.join(out_dir, "best_heterogeneous_config.json")
-    report_path = os.path.join(out_dir, "RAPPORT_SYNTHESE_ETAPE4.md")
+    from niveau1_report import write_reports
+    paths = write_reports(out_dir, run_signature=run_signature, metadata=run_meta,
+                          figures=True, export_png=True)
+    for label, p in paths.items():
+        print(f"{label} : {p}")
 
-    with open(results_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "metadata": {"epochs": args.epochs, "n_seeds": len(seeds),
-                         "device": device.type, "strategy": args.strategy,
-                         "top_n_engineered": (args.top_n_engineered
-                                               if args.strategy == "raw_first" else None),
-                         "n_runs_total": len(results),
-                         "timestamp": datetime.now(timezone.utc).isoformat()},
-            "results": results,
-            "baseline_results": baseline_results,
-        }, f, indent=2, ensure_ascii=False)
-    with open(best_path, "w", encoding="utf-8") as f:
-        json.dump({**best_config, "baseline": baseline_summary}, f, indent=2, ensure_ascii=False)
-
-    ranked = sorted(arch_fitness.items(), key=lambda kv: -kv[1])
-    lines = [
-        "# Rapport de synthese -- Etape 4 (Niveau 1)",
-        "",
-        f"Genere le {datetime.now(timezone.utc).isoformat()} -- {len(results)} runs, "
-        f"{len(arch_fitness)} architectures x regime distinctes, {len(seeds)} graines, "
-        f"device={device.type}.",
-        "",
-        "## Meilleure architecture heterogene",
-        "",
-        f"- Cellule : {best_cell_type}",
-        f"- Regime : {best_regime}",
-        f"- Bases par porte : {dict(best_bases)}",
-        f"- Fitness moyenne (5 graines) : {arch_fitness[best_key]:.4f}",
-        "",
-        "## Comparaison au MKAN uniforme de reference (base hybrid sur toutes les portes)",
-        "",
-        f"- Meme cell_type ({best_cell_type}), meme regime ({best_regime}), memes "
-        f"5 graines, memes hyperparametres theta_opt -- seule la composition des "
-        f"bases par porte differe.",
-        f"- Fitness moyenne baseline uniforme : {baseline_fitness_mean:.4f}",
-        f"- Fitness moyenne architecture heterogene retenue : {arch_fitness[best_key]:.4f}",
-        f"- Gain : {baseline_summary['gain_vs_baseline']:+.4f}",
-        "",
-        "## Classement complet (architecture x regime, fitness moyenne)",
-        "",
-        "| Rang | Cellule | Regime | Bases | Fitness moyenne |",
-        "|---|---|---|---|---|",
-    ]
-    for rank, (key, fit) in enumerate(ranked, start=1):
-        cell_type, regime, bases = key
-        lines.append(f"| {rank} | {cell_type} | {regime} | {dict(bases)} | {fit:.4f} |")
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-
-    print(f"\n{len(results)} runs ecrits dans : {results_path}")
-    print(f"Meilleure config ecrite dans : {best_path}")
-    print(f"Rapport ecrit dans : {report_path}")
 
 
 if __name__ == "__main__":

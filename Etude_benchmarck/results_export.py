@@ -49,7 +49,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from extended_heuristic_search import hidden_size_gru_adjusted, GATE_NAMES_TKAN  # noqa: E402
+from extended_heuristic_search import GATE_NAMES_TKAN  # noqa: E402
 
 logger = logging.getLogger("results_export")
 
@@ -849,7 +849,11 @@ class Step2ResultsExporter:
 
         if best_gru:
             c, m = best_gru
-            h_adj = hidden_size_gru_adjusted(c.get("hidden_size")) if c.get("hidden_size") else None
+            # hidden_size_gru_adjusted() exige désormais input_size (correctif
+            # du bug de scaling, cf. extended_heuristic_search.py) ; ce rapport
+            # ne trace pas input_size par évaluation, donc affiché en N/A plutôt
+            # que de recalculer avec un input_size potentiellement erroné.
+            h_adj = "N/A (input_size non tracé)"
             rows.append(f"| GRUKANCell | {c.get('hidden_size')} | {h_adj} | "
                        f"{self._fmt_num(m['fitness_total'])} | {self._fmt_num(m['MCC_raw'])} |")
         else:

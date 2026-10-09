@@ -28,6 +28,7 @@ from extended_heuristic_search import (          # noqa: E402
     _objective_vector, _constraint_violation, _constrained_dominates,
     _fast_non_dominated_sort, _crowding_distance, LATENCY_CONSTRAINT_MS,
 )
+from gru_cell import match_gru_hidden_size  # noqa: E402
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -333,29 +334,37 @@ class TestCheckpointAndBestModel:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 13. hidden_size_gru_adjusted = floor((4/3) * hidden_size)
+# 13. hidden_size_gru_adjusted : résolution quadratique exacte (délègue à
+#     match_gru_hidden_size), PAS floor((4/3) * hidden_size) -- cf. correctif
+#     du 2026-10-01 (l'ancienne formule fermée surestimait h_GRU d'environ 30%
+#     de budget de paramètres quand input_size << hidden_size, ce qui est le
+#     cas ici : input_size=12, hidden_size>=8).
 # ══════════════════════════════════════════════════════════════════════════
 
 class TestGruAdjustment:
 
     @pytest.mark.parametrize("hidden_size", THETA_OPT_SPACE["hidden_size"])
-    def test_formula_matches_floor_4_3(self, hidden_size):
-        expected = math.floor((4.0 / 3.0) * hidden_size)
-        assert hidden_size_gru_adjusted(hidden_size) == expected
+    def test_formula_matches_match_gru_hidden_size(self, hidden_size):
+        expected = match_gru_hidden_size(12, hidden_size)
+        assert hidden_size_gru_adjusted(hidden_size, 12) == expected
 
     def test_known_values_from_reference_table(self):
-        # Table iso_param (corrigée) du document step_2_search_extension_and_analysis.tex
-        assert hidden_size_gru_adjusted(8) == 10
-        assert hidden_size_gru_adjusted(16) == 21
-        assert hidden_size_gru_adjusted(32) == 42
-        assert hidden_size_gru_adjusted(64) == 85
-        assert hidden_size_gru_adjusted(128) == 170
+        # Valeurs recalculées par résolution quadratique exacte (input_size=12),
+        # cf. match_gru_hidden_size(). Remplacent les anciennes valeurs
+        # floor((4/3)*h) = {8:10, 16:21, 32:42, 64:85, 128:170}, qui reposaient
+        # sur un modèle de scaling linéaire invalide (cf. docstring de
+        # hidden_size_gru_adjusted dans extended_heuristic_search.py).
+        assert hidden_size_gru_adjusted(8, 12) == 10
+        assert hidden_size_gru_adjusted(16, 12) == 19
+        assert hidden_size_gru_adjusted(32, 12) == 38
+        assert hidden_size_gru_adjusted(64, 12) == 75
+        assert hidden_size_gru_adjusted(128, 12) == 149
 
     def test_build_gru_model_uses_adjusted_hidden_size(self):
         ind = _minimal_individual(cell_type="GRUKANCell")
         ind["hidden_size"] = 16
         model = build_model_from_individual(ind, input_size=12)
-        assert model.hidden_size == hidden_size_gru_adjusted(16) == 21
+        assert model.hidden_size == hidden_size_gru_adjusted(16, 12) == 19
 
 
 # ══════════════════════════════════════════════════════════════════════════
