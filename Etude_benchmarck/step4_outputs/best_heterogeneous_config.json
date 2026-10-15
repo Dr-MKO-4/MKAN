@@ -1,0 +1,14 @@
+{
+  "cell_type": "lstm",
+  "regime": "raw",
+  "base_by_gate": {
+    "Candidate": "wavkan_dog",
+    "Forget": "relukan",
+    "Input": "efficientkan",
+    "Output": "linear"
+  },
+  "fitness_mean": 0.72575025702293,
+  "fitness_std": 0.005884587120086898,
+  "n_seeds": 5,
+  "baseline": null
+}
