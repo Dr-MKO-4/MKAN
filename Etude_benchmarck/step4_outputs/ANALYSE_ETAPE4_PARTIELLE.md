@@ -1,4 +1,4 @@
-# Analyse des résultats partiels — Étape 4 (Niveau 1)
+# Analyse des résultats partiels  Étape 4 (Niveau 1)
 
 *Analyse du 13/10/2026 sur les fichiers `step4_progress.jsonl`, `step4_runs.csv`,
 `step4_failures.jsonl` et `val_scores/*.npy` (signature de run `a641e9e5d9c65a87`).
@@ -12,7 +12,7 @@ Toutes les valeurs ci-dessous sont recalculées à partir de ces fichiers ; rien
 |---|---|---|---|
 | TKAN (LSTM-KAN) | 24 architectures × 5 graines = 120 runs | **60 runs** (12 architectures) | 0 |
 | GRU-KAN | 12 architectures × 5 graines = 60 runs | **5 runs** (2 architectures, incomplètes) | **31 tentatives (OOM)** |
-| **Total phase 1** | 180 | **65 (36 %)** | — |
+| **Total phase 1** | 180 | **65 (36 %)** |  |
 
 - Les 12 architectures TKAN terminées ont **toutes `Forget = relukan`**. Les 12 autres
   (`Forget = wavkan_dog`) n'ont pas encore tourné : **l'effet de la porte Forget n'est donc pas encore mesurable.**
