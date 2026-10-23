@@ -27,3 +27,9 @@ Thumbs.db
 
 # Notes internes
 instruction_et_code.txt
+
+# Scores de validation par modèle (lourds, régénérables)
+*.npy
+
+# Fichiers parasites macOS
+._*
