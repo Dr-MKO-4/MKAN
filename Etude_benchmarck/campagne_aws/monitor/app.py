@@ -98,6 +98,40 @@ def _eta(sched: dict, runs: list):
     return statistics.mean(durations) * remaining / max(1, sched.get("workers", 1))
 
 
+# Autres projets suivis sur la meme page (cout et avancement relus sur S3, ou ils
+# sont copies par la sentinelle de leur propre instance). Format :
+# MKAN_OTHER_PROJECTS="Icare:icare:40" (nom:prefixe S3:budget en $, separes par ",").
+OTHER_PROJECTS = [p.split(":") for p in
+                  os.environ.get("MKAN_OTHER_PROJECTS", "Icare:icare:40").split(",") if p]
+_s3_cache = {}
+
+
+def _s3_json(key: str, ttl: float = 60.0):
+    """Lit un JSON sur S3 (au plus une fois par ttl secondes) ; None si absent."""
+    import subprocess
+    now = time.time()
+    if key in _s3_cache and now - _s3_cache[key][0] < ttl:
+        return _s3_cache[key][1]
+    r = subprocess.run(["aws", "s3", "cp", f"s3://{config.S3_BUCKET}/{key}", "-"],
+                       capture_output=True, text=True, timeout=30)
+    try:
+        val = json.loads(r.stdout) if r.returncode == 0 else None
+    except json.JSONDecodeError:
+        val = None
+    _s3_cache[key] = (now, val)
+    return val
+
+
+def _projects() -> list:
+    out = []
+    for name, prefix, budget in OTHER_PROJECTS:
+        out.append({"name": name, "budget_usd": float(budget),
+                    "cost": _s3_json(f"{prefix}/sorties/cost_state.json") or {},
+                    "status": _s3_json(f"{prefix}/sorties/statut.json") or {},
+                    "sentinel": _s3_json(f"{prefix}/sorties/sentinel_state.json") or {}})
+    return out
+
+
 @app.get("/api/state")
 def state():
     sched = _read(os.path.join(config.OUT_DIR, "scheduler_state.json"), {})
@@ -111,7 +145,7 @@ def state():
         "n_runs_done": (summary or {}).get("n_runs_done", 0),
         "cost": _read(os.path.join(config.OUT_DIR, "cost_state.json"), {}),
         "sentinel": _read(os.path.join(config.OUT_DIR, "sentinel_state.json"), {}),
-        "system": _system(), "budget_usd": config.BUDGET_USD,
+        "system": _system(), "budget_usd": config.BUDGET_USD, "projects": _projects(),
         "latency_threshold_ms": config.LATENCY_THRESHOLD_MS,
         "stop": os.path.exists(config.STOP_FILE)})
 
