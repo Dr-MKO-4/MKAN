@@ -162,23 +162,34 @@ def cost_loop(stop_evt: threading.Event, stop_fraction: float, ebs_gb: float) ->
     with _lock:
         _state.update(instance_type=itype, az=az, lifecycle=life)
     cost["segments"].append({"start": _now(), "instance_type": itype, "az": az, "lifecycle": life})
+    # Le temps facture est celui de la MACHINE (temps depuis son demarrage, par
+    # demarrage), pas celui de la sentinelle : si la sentinelle s'arrete puis
+    # repart, l'intervalle est compte au tick suivant (correctif du 03/11 : 3 h
+    # non comptees apres l'arret de tmux).
+    with open("/proc/sys/kernel/random/boot_id") as f:
+        boot_id = f.read().strip()
+    boots = cost.setdefault("boots", {})
+    boots.setdefault(boot_id, {"uptime_h": 0.0, "usd": 0.0, "first_seen": _now()})
     fixed = os.environ.get("MKAN_PRICE_USD_H")
-    price, last_price_t, last_t = None, 0.0, time.time()
+    price, last_price_t = None, 0.0
     while not stop_evt.is_set():
         if fixed:
             price = float(fixed)
         elif life == "spot" and time.time() - last_price_t > 3600:
             price = _spot_price(itype, az) or price
             last_price_t = time.time()
-        now = time.time()
-        dt_h = (now - last_t) / 3600.0
-        last_t = now
+        with open("/proc/uptime") as f:
+            uptime_h = float(f.read().split()[0]) / 3600.0
+        b = boots[boot_id]
+        dt_h = max(0.0, uptime_h - b["uptime_h"])
         ebs = ebs_gb * EBS_USD_PER_GB_MONTH / 730.0
         if price is None:
             _log("prix inconnu : definir MKAN_PRICE_USD_H (role sans ec2:DescribeSpotPriceHistory ?)")
         else:
-            cost["total_usd"] += (price + ebs) * dt_h
-        cost["hours"] += dt_h
+            b["usd"] += (price + ebs) * dt_h
+            b["uptime_h"] = uptime_h
+        cost["total_usd"] = sum(x["usd"] for x in boots.values())
+        cost["hours"] = sum(x["uptime_h"] for x in boots.values())
         cost["price_usd_h"] = price
         cost["updated"] = _now()
         tmp = COST_PATH + ".tmp"
