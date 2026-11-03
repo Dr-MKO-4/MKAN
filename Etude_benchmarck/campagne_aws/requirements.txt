@@ -1,0 +1,13 @@
+numpy
+pandas
+fastparquet
+pyarrow
+scikit-learn
+tqdm
+fastapi
+uvicorn
+psutil
+SALib
+xgboost
+plotly
+kaleido

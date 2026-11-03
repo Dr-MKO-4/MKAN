@@ -75,6 +75,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from extended_heuristic_search import ExtendedHeuristicSearch, select_training_device  # noqa: E402
+from niveau1_harness import read_momtsim_parquet  # noqa: E402
 
 _MODELISATION_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -107,6 +108,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--n_epochs_eval", type=int, default=10,
                    help="Protocole Étape 2 : 10 époques par évaluation fitness.")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--eval_workers", type=int, default=3,
+                   help="Individus évalués en parallèle par génération (threads : "
+                        "_evaluer_un est déjà thread-safe, PyTorch libère le GIL "
+                        "pendant les tenseurs). 1 = séquentiel (ancien comportement). "
+                        "Défaut prudent (3) : build_regime_frame/standardize copient "
+                        "temporairement tout df_train_sample (8,4 M lignes, ~1-2 Go) par "
+                        "individu dont le (regime, W) n'est pas encore en cache -- sur une "
+                        "machine partagée avec d'autres applications (pas toute la RAM "
+                        "disponible), cœurs-1 (7 ici) peut dépasser la mémoire libre réelle. "
+                        "Augmenter si le RAM libre réel (ex. Get-Process | Sort WS) le permet. "
+                        "Sans objet si device != cpu.")
     p.add_argument("--enable-latency-penalty", dest="enable_latency_penalty",
                    action="store_true", default=False,
                    help="Réactive la pénalité de latence dans la fitness_total AHP "
@@ -149,10 +161,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                         "recherche 50k/10 époques) : 5 époques par défaut.")
     p.add_argument("--sensitivity_n_windows_eval", type=int, default=10_000,
                    help="Protocole de sensibilité (RÉDUIT) : 10 000 fenêtres par défaut.")
+    # Défaut 2 : chaque processus recharge train+val (~1 Go) et garde ses
+    # deux régimes préparés (~1 Go), soit ~2 Go par worker.
     p.add_argument("--sensitivity_max_workers", type=int, default=2,
                    help="Processus parallèles pour Sobol/Morris (les workers de "
                         "sensitivity_analysis.py évaluent toujours sur CPU, jamais MPS/CUDA, "
-                        "pour éviter la contention multi-process sur un device GPU).")
+                        "pour éviter la contention multi-process sur un device GPU). Chaque "
+                        "worker est limité à 1 thread torch (sensitivity_analysis.py::"
+                        "_init_worker) et occupe ~2 Go : augmenter seulement si la RAM libre "
+                        "réelle le permet.")
     return p
 
 
@@ -175,22 +192,21 @@ def _load_datasets(args) -> "tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]":
 
     t0 = time.time()
     print(f"Chargement train : {args.train_path}")
-    df_train = pd.read_parquet(args.train_path)
-    print(f"  {len(df_train):,} transactions, {df_train['nameOrig'].nunique():,} comptes "
-         f"({time.time() - t0:.1f}s)")
+    # Colonnes utiles seulement + action en category (cf. read_momtsim_parquet).
+    df_train = read_momtsim_parquet(args.train_path)
+    print(f"  {len(df_train):,} transactions, {df_train['nameOrig'].nunique():,} comptes, "
+         f"{df_train.memory_usage(deep=True).sum() / 1e6:,.0f} Mo ({time.time() - t0:.1f}s)")
 
     t0 = time.time()
     print(f"Chargement val   : {args.val_path}")
-    df_val = pd.read_parquet(args.val_path)
-    print(f"  {len(df_val):,} transactions, {df_val['nameOrig'].nunique():,} comptes "
-         f"({time.time() - t0:.1f}s)")
+    df_val = read_momtsim_parquet(args.val_path)
+    print(f"  {len(df_val):,} transactions, {df_val['nameOrig'].nunique():,} comptes, "
+         f"{df_val.memory_usage(deep=True).sum() / 1e6:,.0f} Mo ({time.time() - t0:.1f}s)")
 
-    t0 = time.time()
-    print(f"Chargement test  : {args.test_path}  (chargé, non utilisé par la fitness)")
-    df_test = pd.read_parquet(args.test_path)
-    print(f"  {len(df_test):,} transactions ({time.time() - t0:.1f}s)")
-
-    return df_train, df_val, df_test
+    # Le test n'est jamais utilisé par la recherche (règle 4 du chapitre 4) :
+    # on vérifie seulement qu'il existe, sans l'occuper en mémoire.
+    print(f"Test             : {args.test_path}  (présence vérifiée, non chargé)")
+    return df_train, df_val, None
 
 
 def _run_sensitivity_analysis(args, search, df_train, df_val) -> None:
@@ -216,6 +232,7 @@ def _run_sensitivity_analysis(args, search, df_train, df_val) -> None:
 
     analyzer = HierarchicalSensitivityAnalyzer(
         search_results_path=best_config_path, df_train=df_train, df_val=df_val,
+        train_path=args.train_path, val_path=args.val_path,
         device="cpu",   # les workers évaluent toujours sur CPU (cf. --sensitivity_max_workers)
         n_epochs_eval=args.sensitivity_n_epochs_eval,
         n_windows_eval=args.sensitivity_n_windows_eval,
@@ -262,15 +279,28 @@ def main(argv=None) -> int:
 
     df_train, df_val, df_test = _load_datasets(args)   # noqa: F841 (df_test conservé pour audit ultérieur)
 
+    # Réglage d'origine, conservé pour mesurer la latence dans les mêmes
+    # conditions qu'en séquentiel (ExtendedHeuristicSearch._premeasure_latencies).
+    latency_num_threads = torch.get_num_threads()
+    if device.type == "cpu" and args.eval_workers > 1:
+        # self.n_workers individus s'entraînent en même temps (threads, cf.
+        # _evaluer_generation) : on divise le pool de threads torch (sinon
+        # chaque entraînement réclame tous les coeurs -> sursouscription
+        # N_workers x N_coeurs sur N_coeurs réels, plus lent qu'en séquentiel).
+        torch.set_num_threads(max(1, (os.cpu_count() or 2) // args.eval_workers))
+        print(f"  Évaluation parallèle : {args.eval_workers} individus en même temps "
+             f"({torch.get_num_threads()} threads torch chacun)")
+
     search = ExtendedHeuristicSearch(
         population_size=args.population_size, elite_size=args.elite_size,
         n_generations=args.n_generations, tournament_size=args.tournament_size,
         mutation_rate=args.mutation_rate, crossover_rate=args.crossover_rate,
         patience=args.patience, n_windows_eval=args.n_windows_eval,
         n_epochs_eval=args.n_epochs_eval, seed=args.seed,
-        scratch_dir=args.scratch_dir,
+        scratch_dir=args.scratch_dir, n_workers=args.eval_workers,
         enforce_latency_constraint=args.enforce_latency_constraint,
         enable_latency_penalty=args.enable_latency_penalty,
+        latency_num_threads=latency_num_threads,
     )
     print(f"Sorties écrites dans : {search.scratch_dir}")
     print(f"Sélection NSGA-II : contrainte de latence "

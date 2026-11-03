@@ -18,10 +18,10 @@ from .bases import (
     HybridBasis, GaussianBasis, RSWAFBasis, BSplineBasis, ChebyshevBasis,
     WaveletBasis, ReLUKANBasis, FourierBasis, JacobiBasis, SincBasis, LinearBasis,
 )
-from .layer import GenericKANLayer
+from .layer import GenericKANLayer, fit_grids_to_data
 
 __all__ = [
-    "BASIS_REGISTRY", "GenericKANLayer",
+    "BASIS_REGISTRY", "GenericKANLayer", "fit_grids_to_data",
     "HybridBasis", "GaussianBasis", "RSWAFBasis", "BSplineBasis", "ChebyshevBasis",
     "WaveletBasis", "ReLUKANBasis", "FourierBasis", "JacobiBasis", "SincBasis", "LinearBasis",
 ]

@@ -67,6 +67,7 @@ import copy
 import json
 import math
 import os
+import platform
 import random
 import sys
 import threading
@@ -110,7 +111,8 @@ from edges import BASIS_REGISTRY                              # noqa: E402
 from lstm_cell import ConfigurableMKANScorer                  # noqa: E402
 from gru_cell import GRUMKANScorer, match_gru_hidden_size      # noqa: E402
 from niveau1_harness import (                                 # noqa: E402
-    build_regime_frame, standardize, build_windows,
+    build_regime_frame, standardize, build_windows, build_windows_sampled,
+    prepare_window_arrays, sample_windows_from_arrays,
     GATE_CANDIDATES as _NIVEAU1_GATE_CANDIDATES,
     GRU_GATE_MAP as _NIVEAU1_GRU_GATE_MAP,
 )
@@ -277,6 +279,37 @@ CONTINUOUS_THETA_OPT = {"lr", "lam", "mu1", "mu2"}
 CELL_TYPES     = ["TKANCell", "GRUKANCell"]
 INPUT_REGIMES  = ["raw", "engineered"]                   # raw=brut, engineered=traité
 _REGIME_TO_NIVEAU1 = {"raw": "brut", "engineered": "traite"}
+
+
+class _NullContext:
+    """Context manager neutre (pas de verrou) -- évite un if/else dupliqué
+    partout où build_semaphore peut être None (évaluation séquentielle)."""
+    def __enter__(self): return self
+    def __exit__(self, *exc): return False
+
+
+_NULL_CONTEXT = _NullContext()
+
+
+def _prepared_regime(df_train: pd.DataFrame, df_val: pd.DataFrame, regime: str,
+                     regime_cache: Optional[dict]) -> "tuple[dict, dict, list]":
+    """Régime construit, standardisé (stats du train) et prêt au fenêtrage,
+    pour train et validation. Mis en cache par régime si regime_cache est
+    fourni : sans cache, chaque appel refait tout le travail sur df_train."""
+    if regime_cache is not None and regime in regime_cache:
+        return regime_cache[regime]
+    df_tr, feature_cols = build_regime_frame(df_train, regime)
+    df_vl, _            = build_regime_frame(df_val, regime)
+    stats = standardize(df_tr, feature_cols)
+    standardize(df_vl, feature_cols, stats=stats)
+    arr_tr = prepare_window_arrays(df_tr, feature_cols)
+    del df_tr
+    arr_vl = prepare_window_arrays(df_vl, feature_cols)
+    del df_vl
+    out = (arr_tr, arr_vl, feature_cols)
+    if regime_cache is not None:
+        regime_cache[regime] = out
+    return out
 
 # Représentation "documentaire" complète exigée par la spécification
 # (Table espace_conditionnel)  dérivée de BASE_PARAM_SPACE/GATE_CANDIDATES,
@@ -571,10 +604,21 @@ def _release_device_memory(device) -> None:
         tqdm.write(f"  [avertissement] libération mémoire device échouée (ignorée) : {exc}")
 
 
-def _penalty_latency(latency_ms: float, alpha_lat: float = 10.0) -> float:
-    if latency_ms <= 100.0:
+def _penalty_latency(latency_ms: float, alpha_lat: float = 10.0,
+                     threshold_ms: float = 100.0, capped: bool = False) -> float:
+    """Penalite de latence de la fitness.
+
+    Par defaut (capped=False, seuil 100 ms) : forme de l'Etape 4 du 21/10,
+    alpha*((L - T)/T)^2 non bornee, conservee pour reproduire ses analyses.
+    capped=True (decision du 2026-11-03, DECISIONS.md) : min(1, (L - T)/T),
+    bornee dans [0, 1] comme les autres criteres de la fitness, avec
+    T = LATENCY_THRESHOLD_V2_MS pour la nouvelle Etape 4."""
+    if latency_ms <= threshold_ms:
         return 0.0
-    return alpha_lat * ((latency_ms - 100.0) / 100.0) ** 2
+    excess = (latency_ms - threshold_ms) / threshold_ms
+    if capped:
+        return min(1.0, excess)
+    return alpha_lat * excess ** 2
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -591,6 +635,10 @@ def _penalty_latency(latency_ms: float, alpha_lat: float = 10.0) -> float:
 # ══════════════════════════════════════════════════════════════════════════
 
 LATENCY_CONSTRAINT_MS = 100.0   # seuil USSD du protocole  inchangé
+# Nouvelle Etape 4 et campagne AWS (DECISIONS.md, 2026-11-03) : seuil releve a
+# 500 ms et penalite plafonnee (_penalty_latency(..., capped=True)). La
+# constante ci-dessus reste a 100 ms pour reproduire l'Etape 4 du 21/10.
+LATENCY_THRESHOLD_V2_MS = 500.0
 
 # ══════════════════════════════════════════════════════════════════════════
 # Poids AHP (Analytic Hierarchy Process, Saaty 1980) du scalaire de départage
@@ -839,6 +887,10 @@ def compute_fitness(
     r2_threshold: float = 0.99,
     enable_latency_penalty: bool = True,
     window_cache: Optional[dict] = None,
+    build_semaphore: Optional["threading.Semaphore"] = None,
+    rng_lock: Optional["threading.Lock"] = None,
+    regime_cache: Optional[dict] = None,
+    latency_ms_override: Optional[float] = None,
 ) -> dict:
     """
     Fitness scientifique de l'Étape 2 (section 3) :
@@ -900,23 +952,25 @@ def compute_fitness(
         if window_cache is not None and cache_key in window_cache:
             X_tr, y_tr, X_vl, y_vl, feature_cols = window_cache[cache_key]
         else:
-            df_tr, feature_cols = build_regime_frame(df_train_sample, regime)
-            df_vl, _            = build_regime_frame(df_val_sample, regime)
-            stats = standardize(df_tr, feature_cols)
-            standardize(df_vl, feature_cols, stats=stats)
-
-            X_tr, y_tr = build_windows(df_tr, W, feature_cols)
-            X_vl, y_vl = build_windows(df_vl, W, feature_cols)
-            if len(X_tr) == 0 or len(X_vl) == 0:
-                raise ValueError("Aucune fenêtre construite (comptes < W transactions)")
-
-            rng_np = np.random.default_rng(seed)
-            if len(X_tr) > n_windows_eval:
-                idx = np.sort(rng_np.choice(len(X_tr), n_windows_eval, replace=False))
-                X_tr, y_tr = X_tr[idx], y_tr[idx]
-            if len(X_vl) > n_windows_eval:
-                idx = np.sort(rng_np.choice(len(X_vl), n_windows_eval, replace=False))
-                X_vl, y_vl = X_vl[idx], y_vl[idx]
+            # La préparation du régime (copie des colonnes, log1p, standardisation,
+            # tri par compte) ne dépend que du régime, pas de W : elle est faite
+            # une seule fois par régime (regime_cache, 2 entrées au plus) ; seul
+            # le tirage des n_windows_eval fenêtres dépend de W. Le verrou évite
+            # que plusieurs threads préparent le même régime en même temps
+            # (chaque préparation copie temporairement ~1 Go de df_train_sample).
+            cm = build_semaphore if build_semaphore is not None else _NULL_CONTEXT
+            with cm:
+                if window_cache is not None and cache_key in window_cache:
+                    X_tr, y_tr, X_vl, y_vl, feature_cols = window_cache[cache_key]
+                else:
+                    arr_tr, arr_vl, feature_cols = _prepared_regime(
+                        df_train_sample, df_val_sample, regime, regime_cache)
+                    # Tirage des seules fenêtres retenues (build_windows_sampled),
+                    # jamais les millions de fenêtres du pool complet.
+                    X_tr, y_tr, _ = sample_windows_from_arrays(arr_tr, W, n_max=n_windows_eval, seed=seed)
+                    X_vl, y_vl, _ = sample_windows_from_arrays(arr_vl, W, n_max=n_windows_eval, seed=seed)
+                    if len(X_tr) == 0 or len(X_vl) == 0:
+                        raise ValueError("Aucune fenêtre construite (comptes < W transactions)")
 
             # Mémorisé APRÈS sous-échantillonnage : ~50 000 fenêtres (~qq dizaines
             # de Mo), jamais le pool complet pré-subsampling (potentiellement
@@ -925,8 +979,19 @@ def compute_fitness(
                 window_cache[cache_key] = (X_tr, y_tr, X_vl, y_vl, feature_cols)
 
         input_size = len(feature_cols)
-        torch.manual_seed(seed)
-        model = build_model_from_individual(config, input_size).to(device)
+        # torch.manual_seed() et torch.randperm() sans generator= tirent tous
+        # deux du generateur ALEATOIRE GLOBAL de torch, partage par TOUS les
+        # threads du processus -- en evaluation parallele (_evaluer_generation,
+        # plusieurs individus = threads concurrents), un thread qui reseed le
+        # generateur pendant qu'un autre est en train d'en tirer des nombres
+        # (initialisation des poids) corrompt silencieusement cette
+        # initialisation (pas juste "graine differente" : tirages entrelaces,
+        # non reproductibles). Le verrou serialise uniquement ce tirage bref
+        # (init des poids), pas l'entrainement qui suit.
+        rl = rng_lock if rng_lock is not None else _NULL_CONTEXT
+        with rl:
+            torch.manual_seed(seed)
+            model = build_model_from_individual(config, input_size).to(device)
 
         optimizer = DMLAdam(model.parameters(), lr=float(config["lr"]))
         batch_size = int(config["batch_size"])
@@ -945,7 +1010,8 @@ def compute_fitness(
         # persistante (cf. _evaluer_generation).
         epoch_pbar = tqdm(range(n_epochs_eval), desc="      entraînement", unit="ép", leave=False)
         for _ in epoch_pbar:
-            perm = torch.randperm(n, device=device)
+            with rl:   # meme generateur global que torch.manual_seed ci-dessus
+                perm = torch.randperm(n, device=device)
             # Accumulation en TENSEUR (pas de .item() par batch) : un .item()
             # par batch forcerait une synchronisation GPU à chaque pas (casse
             # le pipeline asynchrone MPS/CUDA  exactement le genre de coût
@@ -991,7 +1057,11 @@ def compute_fitness(
         mcc_clipped = max(0.0, mcc_raw)
 
         # ── Latence (toujours CPU) + élagage/symbolique (sur un sous-pool) ──
-        latency_ms = _measure_latency_ms(model, W, input_size)
+        # En évaluation parallèle, la latence est mesurée AVANT les threads,
+        # seule sur le CPU (cf. _evaluer_generation) : ici, d'autres individus
+        # s'entraîneraient pendant le chronométrage et le gonfleraient.
+        latency_ms = (latency_ms_override if latency_ms_override is not None
+                      else _measure_latency_ms(model, W, input_size))
         penalty_lat = _penalty_latency(latency_ms)
 
         with torch.no_grad():
@@ -1106,6 +1176,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         maximize:        bool  = True,
         enforce_latency_constraint: bool = True,
         enable_latency_penalty:     bool = True,
+        latency_num_threads: Optional[int] = None,
     ) -> None:
         # espace factice : satisfait la validation du parent (non vide),
         # jamais consulté par les méthodes redéfinies ci-dessous.
@@ -1135,16 +1206,27 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         # avec le vrai paramètre d'instance déjà utilisé pour
         # enforce_latency_constraint et pour HierarchicalSensitivityAnalyzer.
         self.enable_latency_penalty = enable_latency_penalty
+        # Threads torch pour la mesure de latence en évaluation parallèle : le
+        # réglage d'origine du processus, avant sa division entre les threads
+        # d'entraînement (cf. run_search.py, _premeasure_latencies).
+        self.latency_num_threads = latency_num_threads
 
         default_scratch = "/workspace/scratch"
         if scratch_dir is None:
-            # /workspace/scratch est une convention de conteneur cloud absente
-            # de cet environnement Windows : repli documenté sur un dossier
-            # du dépôt si le chemin canonique n'est pas accessible en écriture.
-            try:
-                os.makedirs(default_scratch, exist_ok=True)
-                scratch_dir = default_scratch
-            except OSError:
+            # /workspace/scratch est une convention de conteneur cloud : sous
+            # Windows, "/workspace/scratch" est interprété comme relatif à la
+            # racine du lecteur courant (ex. M:\workspace\scratch) et
+            # os.makedirs() y réussit toujours, donc un simple try/except ne
+            # détecte rien. On exige en plus que /workspace existe DÉJÀ (un
+            # vrai conteneur cloud le monte lui-même ; on ne le crée jamais)
+            # et qu'on soit sous Linux, avant d'utiliser le chemin canonique.
+            if platform.system() == "Linux" and os.path.isdir("/workspace"):
+                try:
+                    os.makedirs(default_scratch, exist_ok=True)
+                    scratch_dir = default_scratch
+                except OSError:
+                    scratch_dir = os.path.join(_MKAN_DIR, "checkpoints", "extended_search")
+            else:
                 scratch_dir = os.path.join(_MKAN_DIR, "checkpoints", "extended_search")
         os.makedirs(scratch_dir, exist_ok=True)
         self.scratch_dir = scratch_dir
@@ -1162,6 +1244,21 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         self._input_size_used: Optional[int]  = None
         self._components: list = []   # fitness_components par individu de la génération courante
         self._window_cache: dict = {}   # (regime, W) -> fenêtres sous-échantillonnées déjà construites
+        # Borne le nombre de constructions MÉMOIRE-LOURDES simultanées
+        # (build_regime_frame/standardize/build_windows_sampled sur tout
+        # df_train_sample, cf. compute_fitness) à 2, indépendamment de
+        # n_workers (le nombre d'individus entraînés en parallèle) : la copie
+        # d'entraînement elle-même est bon marché en mémoire, c'est la
+        # construction des fenêtres pour un (regime, W) encore absent du
+        # cache qui peut faire plusieurs centaines de Mo à ~1 Go par individu.
+        # Une seule préparation à la fois : la préparation d'un régime n'a lieu
+        # que 2 fois par run (régime -> regime_cache), le reste est un tirage
+        # de 50 000 fenêtres, bref.
+        self._build_semaphore = threading.Semaphore(1) if self.n_workers > 1 else None
+        self._regime_cache: dict = {}   # regime -> (arr_tr, arr_vl, feature_cols)
+        # Serialise torch.manual_seed()/torch.randperm() (generateur ALEATOIRE
+        # GLOBAL de torch, partage entre threads -- cf. compute_fitness).
+        self._rng_lock = threading.Lock() if self.n_workers > 1 else None
         self._last_checkpointed_generation: Optional[int] = None
         self._validation_full: dict = {}   # rempli par evaluate_best_on_full_validation()
 
@@ -1526,6 +1623,9 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         zéro  permet d'interrompre puis relancer un run long (section 11).
         Si aucun checkpoint n'existe, démarre normalement (pas une erreur).
         """
+        # Identité des données de ce fit : la validation finale ne réutilise
+        # regime_cache que si on lui passe exactement ces mêmes DataFrames.
+        self._fit_data_ids = (id(df_train), id(df_val))
         resumed = False
         if resume_from_checkpoint:
             resumed = self._restore_from_checkpoint()
@@ -1555,6 +1655,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             # resume garde le cache car il poursuit la MÊME recherche sur les
             # MÊMES données par construction.
             self._window_cache = {}
+            self._regime_cache = {}
 
         start_gen = (self._last_checkpointed_generation + 1) if resumed else 0
         sans_amelioration = 0
@@ -1661,6 +1762,37 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         self._scores = e_scores + [None] * len(enfants)
         self._components = e_comps + [None] * len(enfants)
 
+    def _premeasure_latencies(self, to_eval: list) -> dict:
+        """Latence CPU de chaque individu, mesurée dans le thread principal
+        AVANT de lancer les threads d'entraînement : seule sur le CPU et avec
+        le nombre de threads torch d'origine (latency_num_threads), soit les
+        mêmes conditions qu'en évaluation séquentielle. La latence ne dépend
+        que de l'architecture (opérations denses : la valeur des poids ne
+        change pas le nombre d'opérations), d'où une mesure sur le modèle
+        non entraîné. Un individu dont la mesure échoue retombe sur la mesure
+        habituelle dans compute_fitness."""
+        from niveau1_harness import PROCESSED_FEATURE_COLS, RAW_NUMERIC_COLS, ACTION_ONEHOT_COLS
+        n_feat = {"brut": len(RAW_NUMERIC_COLS) + len(ACTION_ONEHOT_COLS),
+                  "traite": len(PROCESSED_FEATURE_COLS)}
+        train_threads = torch.get_num_threads()
+        if self.latency_num_threads:
+            torch.set_num_threads(self.latency_num_threads)
+        out = {}
+        try:
+            for i, ind in to_eval:
+                if not validate_individual(ind):
+                    continue
+                try:
+                    input_size = n_feat[_REGIME_TO_NIVEAU1[ind["Input_Regime"]]]
+                    model = build_model_from_individual(ind, input_size)
+                    out[i] = _measure_latency_ms(model, int(ind["W"]), input_size)
+                    del model
+                except Exception:   # noqa: BLE001  repli sur la mesure dans compute_fitness
+                    pass
+        finally:
+            torch.set_num_threads(train_threads)
+        return out
+
     def _evaluer_generation(self, gen: int, df_train, df_val, device) -> None:
         from tqdm.auto import tqdm
 
@@ -1668,16 +1800,41 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         to_eval = [(i, ind) for i, ind in enumerate(self._population) if self._scores[i] is None]
         pbar = tqdm(to_eval, desc=f"  |- gen {gen + 1}/{self.n_generations} individus",
                    unit="ind", leave=False, colour="green",
-                   bar_format="{l_bar}{bar:28}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}{postfix}]")
+                   bar_format="{l_bar}{bar:28}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}{postfix}]",
+                   total=len(to_eval))
         n_echecs = 0
-        for i, ind in pbar:
-            result = self._evaluer_un(gen, i, ind, df_train, df_val, device)
+
+        def _record(i: int, ind: dict, result: dict) -> None:
+            nonlocal n_echecs
             self._scores[i] = result["fitness_total"] if result["fitness_total"] is not None \
                 else self.invalid_fitness
             self._components[i] = result.get("fitness_components")
             if result.get("fitness_components") is None:
                 n_echecs += 1
             pbar.set_postfix({"fitness": f"{self._scores[i]:.4f}", "base": ind.get("Cell_Type")})
+            pbar.update(1)
+
+        if self.n_workers <= 1:
+            for i, ind in to_eval:
+                _record(i, ind, self._evaluer_un(gen, i, ind, df_train, df_val, device))
+        else:
+            # Évaluation en parallèle (threads) : PyTorch libère le GIL pendant
+            # les opérations tenseur, donc plusieurs individus s'entraînent
+            # réellement en même temps sur CPU, cf. RechercheHeuristique._evaluer.
+            # _evaluer_un est déjà thread-safe (self._log_lock protège l'écriture
+            # de _best_result/_best_individual et les écritures disque). Le
+            # nombre de threads torch par entraînement est divisé par
+            # n_workers (cf. fit()) pour éviter la sursouscription CPU.
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            latencies = self._premeasure_latencies(to_eval)
+            with ThreadPoolExecutor(max_workers=self.n_workers) as pool:
+                futures = {pool.submit(self._evaluer_un, gen, i, ind, df_train, df_val, device,
+                                       latencies.get(i)): (i, ind)
+                          for i, ind in to_eval}
+                for fut in as_completed(futures):
+                    i, ind = futures[fut]
+                    _record(i, ind, fut.result())
+        pbar.close()
 
         # Chaque échec individuel produit déjà une ligne [ERREUR], mais rien ne
         # signale explicitement un ÉCHEC SYSTÉMIQUE (tous les individus tombent
@@ -1694,7 +1851,8 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                       f"cause exacte (souvent la même pour tous).")
 
     def _evaluer_un(self, gen: int, individual_id: int, individual: dict,
-                    df_train, df_val, device) -> dict:
+                    df_train, df_val, device,
+                    latency_ms_override: Optional[float] = None) -> dict:
         if not validate_individual(individual):
             result = {"fitness_total": self.invalid_fitness, "fitness_components": None,
                       "model_state": None, "error": "individu invalide (validate_individual)"}
@@ -1704,6 +1862,10 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                                          n_windows_eval=self.n_windows_eval,
                                          n_epochs_eval=self.n_epochs_eval, seed=self.seed,
                                          window_cache=self._window_cache,
+                                         build_semaphore=self._build_semaphore,
+                                         rng_lock=self._rng_lock,
+                                         regime_cache=self._regime_cache,
+                                         latency_ms_override=latency_ms_override,
                                          enable_latency_penalty=self.enable_latency_penalty)
             except Exception as exc:   # noqa: BLE001  robustesse absolue (section 14)
                 result = {"fitness_total": None, "fitness_components": None,
@@ -1895,13 +2057,15 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             model.to(device).eval()
 
             regime = _REGIME_TO_NIVEAU1[self._best_individual["Input_Regime"]]
-            df_tr, feature_cols = build_regime_frame(df_train_for_stats, regime)
-            df_vl, _            = build_regime_frame(df_val_full, regime)
-            stats = standardize(df_tr, feature_cols)
-            standardize(df_vl, feature_cols, stats=stats)
+            same_data = getattr(self, "_fit_data_ids", None) == (id(df_train_for_stats), id(df_val_full))
+            _, arr_vl, feature_cols = _prepared_regime(
+                df_train_for_stats, df_val_full, regime,
+                self._regime_cache if same_data else None)
 
             W = int(self._best_individual["W"])
-            X_vl, y_vl = build_windows(df_vl, W, feature_cols)
+            # n_max=None : toutes les fenêtres de validation, chemin vectorisé
+            # (mêmes fenêtres, même ordre que build_windows, sans boucle Python).
+            X_vl, y_vl, _ = sample_windows_from_arrays(arr_vl, W, n_max=None)
             if len(X_vl) == 0:
                 self._warn_full_validation("0 fenêtre construite sur df_val_full")
                 return None

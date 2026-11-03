@@ -97,3 +97,22 @@ class GenericKANLayer(nn.Module):
     def l1_norm(self) -> torch.Tensor:
         """Proxy par poids (non conforme à eq. 2.19, cf. HybridKANLayer.l1_norm)."""
         return self.basis.l1_norm()
+
+
+@torch.no_grad()
+def fit_grids_to_data(model: nn.Module, x_samples: torch.Tensor) -> int:
+    """Recale sur les donnees la grille des bases a grille de toutes les portes
+    du modele (correctif du domaine, 2026-11-03, cf. bases.py).
+
+    x_samples : (n, input_size), valeurs x_t (apres pretraitement) tirees des
+    fenetres d'entrainement. Une porte recoit concat(h, x) : les input_size
+    DERNIERES colonnes sont x et sont recalees ; les colonnes h gardent
+    [-1, 1], leur domaine exact (h = o * tanh(c) pour la TKAN, combinaison
+    convexe de tanh pour la GRU). Retourne le nombre de portes recalees."""
+    n_fitted = 0
+    for layer in model.modules():
+        if isinstance(layer, GenericKANLayer) and hasattr(layer.basis, "fit_grid"):
+            start_col = layer.in_features - x_samples.shape[1]
+            layer.basis.fit_grid(x_samples, start_col)
+            n_fitted += 1
+    return n_fitted

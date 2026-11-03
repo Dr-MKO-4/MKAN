@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import platform
 import sys
 import time
 import traceback
@@ -200,9 +201,20 @@ class HierarchicalSensitivityAnalyzer:
         log_path: Optional[str] = None,
         seed: int = 42,
         enable_latency_penalty: bool = True,
+        train_path: Optional[str] = None,
+        val_path: Optional[str] = None,
     ) -> None:
         self.df_train = df_train
         self.df_val = df_val
+        # Chemins d'origine des parquets (section 15) : permettent à chaque
+        # worker ProcessPoolExecutor de RECHARGER df_train/df_val lui-même
+        # depuis le disque plutôt que de les recevoir par pickle (cf.
+        # __getstate__/__setstate__ ci-dessous)  sérialiser des DataFrames de
+        # plusieurs millions de lignes vers chaque processus dépasse la
+        # limite de la pipe multiprocessing sous Windows (spawn), qui échoue
+        # silencieusement en "pickle data was truncated" sans message clair.
+        self._train_path = train_path
+        self._val_path = val_path
         self.device = device
         self.n_epochs_eval = n_epochs_eval
         self.n_windows_eval = n_windows_eval
@@ -217,10 +229,19 @@ class HierarchicalSensitivityAnalyzer:
 
         default_scratch = "/workspace/scratch"
         if scratch_dir is None:
-            try:
-                os.makedirs(default_scratch, exist_ok=True)
-                scratch_dir = default_scratch
-            except OSError:
+            # Même piège que extended_heuristic_search.py : sous Windows,
+            # "/workspace/scratch" est relatif à la racine du lecteur courant
+            # et os.makedirs() y réussit toujours, donc on exige en plus que
+            # /workspace existe déjà (vrai conteneur cloud) et qu'on soit sous
+            # Linux avant d'emprunter ce chemin.
+            if platform.system() == "Linux" and os.path.isdir("/workspace"):
+                try:
+                    os.makedirs(default_scratch, exist_ok=True)
+                    scratch_dir = default_scratch
+                except OSError:
+                    scratch_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                               "checkpoints", "sensitivity")
+            else:
                 scratch_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                            "checkpoints", "sensitivity")
         os.makedirs(scratch_dir, exist_ok=True)
@@ -242,6 +263,33 @@ class HierarchicalSensitivityAnalyzer:
         self._errors_path = os.path.join(self.scratch_dir, "evaluation_errors.jsonl")
         self._checkpoint_path = os.path.join(self.scratch_dir, "sobol_evaluations.npy")
         self._n_evaluated_total = 0
+
+    # ── Pickling allégé vers les workers ProcessPoolExecutor (section 15) ───
+    # df_train/df_val (plusieurs millions de lignes) sont exclues du pickle
+    # envoyé à chaque worker : sous Windows (spawn), la pipe multiprocessing
+    # échoue silencieusement ("pickle data was truncated") au-delà de
+    # quelques Go, et sérialiser 7x les mêmes données est de toute façon
+    # inutile. Chaque worker recharge lui-même les parquets depuis le disque
+    # à la première utilisation (cf. _ensure_dataframes_loaded), à partir des
+    # chemins conservés dans _train_path/_val_path.
+
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        state["df_train"] = None
+        state["df_val"] = None
+        state["_regime_cache"] = None   # reconstruits dans chaque worker
+        state["_window_cache"] = None
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+
+    def _ensure_dataframes_loaded(self) -> None:
+        from niveau1_harness import read_momtsim_parquet
+        if self.df_train is None and self._train_path:
+            self.df_train = read_momtsim_parquet(self._train_path)
+        if self.df_val is None and self._val_path:
+            self.df_val = read_momtsim_parquet(self._val_path)
 
     # ── Chargement des résultats de la recherche (section 18) ───────────────
 
@@ -472,10 +520,18 @@ class HierarchicalSensitivityAnalyzer:
         try:
             if not validate_individual(individual):
                 raise ValueError("individu invalide (validate_individual)")
+            # Caches par processus (régime préparé une fois, puis tirage par W) :
+            # sans eux, chacune des ~51 690 évaluations refaisait toute la
+            # préparation sur les 8,4 M lignes. Résultat identique (graine et
+            # n_windows_eval fixes sur toute l'analyse, cf. compute_fitness).
+            if getattr(self, "_regime_cache", None) is None:
+                self._regime_cache, self._window_cache = {}, {}
             result = compute_fitness(individual, self.df_train, self.df_val, "cpu",
                                      n_windows_eval=self.n_windows_eval,
                                      n_epochs_eval=self.n_epochs_eval, seed=self.seed,
-                                     enable_latency_penalty=self.enable_latency_penalty)
+                                     enable_latency_penalty=self.enable_latency_penalty,
+                                     window_cache=self._window_cache,
+                                     regime_cache=self._regime_cache)
             if result["fitness_total"] is None:
                 raise RuntimeError(result.get("error", "compute_fitness a échoué"))
             fitness = result["fitness_total"]
@@ -1031,6 +1087,18 @@ _WORKER_ANALYZER: Optional[HierarchicalSensitivityAnalyzer] = None
 
 
 def _init_worker(analyzer: HierarchicalSensitivityAnalyzer) -> None:
+    # Sans ceci, chaque processus hérite du nombre de threads torch par défaut
+    # (= tous les coeurs logiques) : avec max_workers > 1, les processus se
+    # disputent le CPU au lieu de l'utiliser en parallele (sursouscription
+    # N_workers x N_coeurs threads sur N_coeurs reels).
+    import torch
+    # Réglage par défaut du processus (cœurs physiques) partagé entre les
+    # workers, plutôt que 1 thread : la latence mesurée dans compute_fitness
+    # reste plus proche des conditions de la recherche.
+    torch.set_num_threads(max(1, torch.get_num_threads() // max(1, analyzer.max_workers)))
+    # df_train/df_val ont ete exclues du pickle (__getstate__) : chaque worker
+    # les recharge depuis le disque une seule fois, a l'initialisation.
+    analyzer._ensure_dataframes_loaded()
     global _WORKER_ANALYZER
     _WORKER_ANALYZER = analyzer
 

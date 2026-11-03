@@ -70,6 +70,19 @@ TIME_COL    = "step"
 BINARY_COLS = {"flag_anomalie", "flag_nuit"}
 ACTION_ONEHOT_COLS = [f"action_{cat}" for cat in ACTION_CATEGORIES]
 
+NEEDED_COLS = list(dict.fromkeys(
+    [ACCOUNT_COL, TIME_COL, TARGET_COL, "action"] + RAW_NUMERIC_COLS + PROCESSED_FEATURE_COLS))
+
+
+def read_momtsim_parquet(path: str) -> pd.DataFrame:
+    """Lit un journal MoMTSim avec les seules colonnes utilisées par les deux
+    régimes, `action` en category (~8 Mo au lieu de ~540 Mo en object sur
+    8,4 M lignes). engine="fastparquet" : pyarrow 19.0.0 échoue à relire ces
+    fichiers ("Repetition level histogram size mismatch", bug de lecture)."""
+    df = pd.read_parquet(path, engine="fastparquet", columns=NEEDED_COLS)
+    df["action"] = df["action"].astype("category")
+    return df
+
 
 def build_regime_frame(df: pd.DataFrame, regime: str) -> "tuple[pd.DataFrame, list]":
     """
@@ -91,12 +104,24 @@ def build_regime_frame(df: pd.DataFrame, regime: str) -> "tuple[pd.DataFrame, li
     Returns:
         df augmenté des colonnes finales, liste des noms de colonnes finales
     """
-    df = df.copy()
+    # Copie des SEULES colonnes utiles (features + compte/pas/étiquette pour le
+    # fenêtrage), pas des 31 colonnes du journal : df.copy() complet dupliquait
+    # aussi action/fraudScenario en object (~800 Mo sur 8,4 M lignes) à chaque
+    # appel. Ordre des lignes conservé -> fenêtres identiques.
+    keep = [ACCOUNT_COL, TIME_COL, TARGET_COL]
+    if regime == "traite":
+        keep += PROCESSED_FEATURE_COLS
+    elif regime == "brut":
+        keep += RAW_NUMERIC_COLS + ["action"]
+    else:
+        raise ValueError(f"regime inconnu : {regime}")
+    df = df[keep].copy()
     if regime == "traite":
         cols = PROCESSED_FEATURE_COLS
     elif regime == "brut":
         for cat in ACTION_CATEGORIES:
             df[f"action_{cat}"] = (df["action"] == cat).astype(np.float32)
+        df = df.drop(columns="action")
         cols = RAW_NUMERIC_COLS + ACTION_ONEHOT_COLS
     else:
         raise ValueError(f"regime inconnu : {regime}")
@@ -203,19 +228,36 @@ def build_windows_sampled(df: pd.DataFrame, W: int, feature_cols: list,
     seules les fenetres RETENUES sont materialisees : sur 16 M de lignes,
     build_windows construit d'abord ~16 M fenetres (boucle Python, ~10 Go de
     RAM pour W=10) pour n'en garder que 50 000."""
+    return sample_windows_from_arrays(prepare_window_arrays(df, feature_cols),
+                                      W, max_accounts, n_max, seed)
+
+
+def prepare_window_arrays(df: pd.DataFrame, feature_cols: list) -> dict:
+    """Partie de build_windows_sampled qui ne dépend PAS de W (tri par compte
+    puis pas, extraction en float32, bornes de chaque compte) : calculée une
+    fois par régime, réutilisée pour tous les W par sample_windows_from_arrays.
+    Quelques centaines de Mo au lieu de la DataFrame complète."""
     df = df.sort_values([ACCOUNT_COL, TIME_COL], kind="mergesort").reset_index(drop=True)
     feat = df[feature_cols].to_numpy(dtype=np.float32)
     targ = df[TARGET_COL].to_numpy(dtype=np.float32)
     acct = df[ACCOUNT_COL].to_numpy()
-
     _, starts = np.unique(acct, return_index=True)
     ends = np.append(starts[1:], len(acct))
+    return {"feat": feat, "targ": targ, "starts": starts, "ends": ends,
+            "n_features": len(feature_cols)}
+
+
+def sample_windows_from_arrays(arr: dict, W: int, max_accounts: Optional[int] = None,
+                               n_max: Optional[int] = None, seed: int = 42):
+    """Tirage de n_max fenêtres de longueur W (mêmes fenêtres et même ordre
+    que build_windows_sampled) à partir de prepare_window_arrays."""
+    feat, targ, starts, ends = arr["feat"], arr["targ"], arr["starts"], arr["ends"]
     if max_accounts is not None:
         starts, ends = starts[:max_accounts], ends[:max_accounts]
     n_win = np.maximum(ends - starts - W + 1, 0)
     total = int(n_win.sum())
     if total == 0:
-        return (np.zeros((0, W, len(feature_cols)), dtype=np.float32),
+        return (np.zeros((0, W, arr["n_features"]), dtype=np.float32),
                 np.zeros((0,), dtype=np.float32), 0)
 
     if n_max and total > n_max:
@@ -246,8 +288,8 @@ def load_and_window(train_path: str, val_path: str, regime: str, W: int,
     seulement 4 combinaisons (regime, W) distinctes dans le plan Niveau 1 --
     fenetrage par compte en boucle Python, le poste le plus couteux hors
     entrainement lui-meme)."""
-    df_train = pd.read_parquet(train_path)
-    df_val   = pd.read_parquet(val_path)
+    df_train = read_momtsim_parquet(train_path)
+    df_val   = read_momtsim_parquet(val_path)
 
     df_train, feature_cols = build_regime_frame(df_train, regime)
     df_val, _              = build_regime_frame(df_val, regime)
@@ -492,7 +534,7 @@ def run_config(cfg: RunConfig, train_path: str, val_path: str,
 
 def compute_metrics(y_true: np.ndarray, scores: np.ndarray) -> dict:
     from sklearn.metrics import (roc_auc_score, average_precision_score,
-                                  precision_recall_curve, brier_score_loss, f1_score,
+                                  precision_recall_curve, brier_score_loss,
                                   matthews_corrcoef)
     out = {}
     if len(np.unique(y_true)) < 2:
@@ -509,9 +551,14 @@ def compute_metrics(y_true: np.ndarray, scores: np.ndarray) -> dict:
         mask = recall >= target_recall
         out[f"precision_at_recall_{target_recall}"] = float(precision[mask].max()) if mask.any() else 0.0
 
-    thresholds = np.linspace(0.01, 0.99, 99)
-    f1s = [f1_score(y_true, scores >= t) for t in thresholds]
-    out["f1_best"] = float(max(f1s))
+    # F1 derive directement de precision_recall_curve (deja calcule ci-dessus)
+    # plutot que de rappeler f1_score sur une grille de 99 seuils fixes : les
+    # points de precision_recall_curve sont deja aux seuils les plus
+    # informatifs (chaque score unique), donc au moins aussi precis, sans les
+    # 99 passes sklearn supplementaires sur y_true/scores (couteux sur les
+    # grands jeux, ex. validation complete a ~1,3 M fenetres).
+    f1_curve = 2 * precision * recall / np.clip(precision + recall, 1e-12, None)
+    out["f1_best"] = float(np.nanmax(f1_curve)) if f1_curve.size else 0.0
     return out
 
 

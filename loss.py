@@ -40,7 +40,21 @@ def weighted_bce(scores: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     scores  = scores.float()
     targets = targets.float()
 
-    # Les comptes et poids sont calculés sur CPU via .item() pour éviter
+    if scores.device.type != "privateuseone":
+        # Meme formule, poids calcules en tenseurs sur le device : aucun .item(),
+        # donc aucune synchronisation hote/device a chaque lot (correctif
+        # 2026-11-03). Ecart avec la branche DirectML ci-dessous : poids en
+        # float32 au lieu de float64 arrondi en float32, soit au plus un ulp.
+        N = targets.shape[0]
+        n_fraud = targets.sum().clamp(min=1.0)
+        n_legit = (N - n_fraud).clamp(min=1.0)
+        w_fraud = (0.5 * N) / n_fraud
+        w_legit = (0.5 * N) / n_legit
+        weights = targets * (w_fraud - w_legit) + w_legit
+        scores = scores.clamp(min=1e-7, max=1 - 1e-7)
+        return -(weights * (targets * scores.log() + (1.0 - targets) * (1.0 - scores).log())).mean()
+
+    # DirectML (privateuseone) : les comptes et poids sont calculés sur CPU via .item() pour éviter
     # toute opération scalaire float64 sur DirectML (rsub/rdiv non supportés).
     n_fraud = max(targets.sum().item(), 1.0)
     n_legit = max(targets.shape[0] - n_fraud, 1.0)

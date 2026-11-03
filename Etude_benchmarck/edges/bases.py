@@ -56,23 +56,74 @@ def _bmm_edges(basis_vals: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Domaine des bases a grille (correctif 2026-11-03, probleme P3 de la session 3)
+#
+# Une porte recoit concat(h_{t-1}, x_t) : h_{t-1} est dans (-1, 1) mais x_t est
+# standardise puis ecrete a [-4, 4] (niveau1_harness.standardize). Les bases a
+# grille etaient toutes construites sur [-1, 1] : la B-spline ecretait x a ce
+# domaine (fonction constante au-dela) et les gaussiennes fixes y etaient quasi
+# nulles au-dela de |x| ~ 1,5. Centres/largeurs sont desormais PAR ENTREE
+# (buffers (in, M)) et `fit_grid` les recale sur les donnees (colonnes x) en
+# laissant [-1, 1] aux colonnes h. Sans appel a fit_grid, les valeurs sont
+# identiques a l'ancienne construction (meme domaine, memes centres) ; les
+# anciens state_dict (buffers 1-D) se rechargent par diffusion (_LegacyGridLoad).
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _LegacyGridLoad:
+    """Recharge un state_dict d'avant le correctif : un buffer partage par toutes
+    les entrees (forme (M,) ou scalaire) est diffuse a la forme par entree."""
+
+    _per_input_buffers = ()
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        for name in self._per_input_buffers:
+            key = prefix + name
+            target = getattr(self, name)
+            if key in state_dict and state_dict[key].shape != target.shape:
+                state_dict[key] = state_dict[key].reshape(
+                    (1,) * (target.dim() - state_dict[key].dim()) + tuple(state_dict[key].shape)
+                ).expand_as(target).clone()
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
+
+def _column_range(samples: torch.Tensor, margin: float = 0.01):
+    """Bornes par colonne d'un echantillon (n, d), elargies de `margin` comme
+    update_grid d'EfficientKAN (Blealtan, 2024)."""
+    lo = samples.min(dim=0).values - margin
+    hi = samples.max(dim=0).values + margin
+    return lo, hi
+
+
+def _fit_uniform_rbf(centers: torch.Tensor, samples: torch.Tensor, start_col: int,
+                     n_centers: int) -> None:
+    """Place n_centers centres equidistants sur l'etendue des donnees, pour les
+    colonnes start_col: de `centers` (in, n_centers) ; samples : (n, in - start_col)."""
+    lo, hi = _column_range(samples.to(centers.dtype))
+    steps = torch.linspace(0.0, 1.0, n_centers, dtype=centers.dtype)
+    centers[start_col:] = lo[:, None] + (hi - lo)[:, None] * steps[None, :]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Référence MKAN : Gaussienne (FastKAN) + Fourier (KAN-AD)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class HybridBasis(nn.Module):
+class HybridBasis(_LegacyGridLoad, nn.Module):
     """Réplique de HybridEdgeFunction (eq. 4.13). M + 2K paramètres/arête."""
 
     budget_kwargs = dict(M=8, K=2)
     native_kwargs = dict(M=8, K=2)
+    _per_input_buffers = ("centers", "neg_half_over_h2")
 
     def __init__(self, in_features: int, out_features: int,
                  M: int = 8, K: int = 2, domain: float = 1.0, h: float = None):
         super().__init__()
-        centers = torch.linspace(-domain, domain, M)
+        self.M = M
+        centers = torch.linspace(-domain, domain, M).repeat(in_features, 1)     # (in, M)
         self.register_buffer("centers", centers)
         if h is None:
             h = 2 * domain / (M - 1)
-        self.register_buffer("neg_half_over_h2", torch.tensor(-0.5 * float(h) ** -2))
+        self.register_buffer("neg_half_over_h2",
+                             torch.full((in_features, 1), -0.5 * float(h) ** -2))
         self.register_buffer("k_idx", torch.arange(1, K + 1, dtype=torch.float32))
 
         self.w_gauss   = nn.Parameter(torch.randn(in_features, out_features, M) * 0.1)
@@ -89,6 +140,14 @@ class HybridBasis(nn.Module):
                        + _bmm_edges(torch.sin(kx), self.b_fourier))
         return gauss_out + fourier_out
 
+    @torch.no_grad()
+    def fit_grid(self, samples: torch.Tensor, start_col: int) -> None:
+        """Gaussiennes uniformes sur [min, max] de chaque colonne >= start_col
+        (meme regle que la construction par domaine : h = etendue / (M - 1))."""
+        _fit_uniform_rbf(self.centers, samples, start_col, self.M)
+        h = (self.centers[start_col:, -1] - self.centers[start_col:, 0]) / (self.M - 1)
+        self.neg_half_over_h2[start_col:, 0] = -0.5 * h.pow(-2)
+
     def l1_norm(self) -> torch.Tensor:
         return (self.w_gauss.abs().sum() + self.a_fourier.abs().sum()
                 + self.b_fourier.abs().sum())
@@ -98,26 +157,35 @@ class HybridBasis(nn.Module):
 # FastKAN  RBF gaussienne (Li, 2024)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class GaussianBasis(nn.Module):
+class GaussianBasis(_LegacyGridLoad, nn.Module):
     """FastKAN : phi(x) = sum_m w_m exp(-(x-mu_m)^2 / 2h^2). M paramètres/arête."""
 
     budget_kwargs = dict(M=12)
     native_kwargs = dict(M=8)   # 8 centres RBF, réglage publié (Li, 2024)
+    _per_input_buffers = ("centers", "neg_half_over_h2")
 
     def __init__(self, in_features: int, out_features: int,
                  M: int = 12, domain: float = 1.0, h: float = None):
         super().__init__()
-        centers = torch.linspace(-domain, domain, M)
+        self.M = M
+        centers = torch.linspace(-domain, domain, M).repeat(in_features, 1)     # (in, M)
         self.register_buffer("centers", centers)
         if h is None:
             h = 2 * domain / (M - 1)
-        self.register_buffer("neg_half_over_h2", torch.tensor(-0.5 * float(h) ** -2))
+        self.register_buffer("neg_half_over_h2",
+                             torch.full((in_features, 1), -0.5 * float(h) ** -2))
         self.weight = nn.Parameter(torch.randn(in_features, out_features, M) * 0.1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         diff  = x.unsqueeze(-1) - self.centers
         basis = torch.exp(self.neg_half_over_h2 * diff.square())
         return _bmm_edges(basis, self.weight)
+
+    @torch.no_grad()
+    def fit_grid(self, samples: torch.Tensor, start_col: int) -> None:
+        _fit_uniform_rbf(self.centers, samples, start_col, self.M)
+        h = (self.centers[start_col:, -1] - self.centers[start_col:, 0]) / (self.M - 1)
+        self.neg_half_over_h2[start_col:, 0] = -0.5 * h.pow(-2)
 
     def l1_norm(self) -> torch.Tensor:
         return self.weight.abs().sum()
@@ -127,26 +195,34 @@ class GaussianBasis(nn.Module):
 # FasterKAN  RSWAF (introduite dans BSRBF-KAN, Ta 2024)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class RSWAFBasis(nn.Module):
+class RSWAFBasis(_LegacyGridLoad, nn.Module):
     """FasterKAN : phi(x) = sum_m w_m [1 - tanh^2((x-mu_m)/h)]. M paramètres/arête."""
 
     budget_kwargs = dict(M=12)
     native_kwargs = dict(M=8)
+    _per_input_buffers = ("centers", "inv_h")
 
     def __init__(self, in_features: int, out_features: int,
                  M: int = 12, domain: float = 1.0, h: float = None):
         super().__init__()
-        centers = torch.linspace(-domain, domain, M)
+        self.M = M
+        centers = torch.linspace(-domain, domain, M).repeat(in_features, 1)     # (in, M)
         self.register_buffer("centers", centers)
         if h is None:
             h = 2 * domain / (M - 1)
-        self.register_buffer("inv_h", torch.tensor(1.0 / float(h)))
+        self.register_buffer("inv_h", torch.full((in_features, 1), 1.0 / float(h)))
         self.weight = nn.Parameter(torch.randn(in_features, out_features, M) * 0.1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         t     = (x.unsqueeze(-1) - self.centers) * self.inv_h
         basis = 1.0 - torch.tanh(t).square()
         return _bmm_edges(basis, self.weight)
+
+    @torch.no_grad()
+    def fit_grid(self, samples: torch.Tensor, start_col: int) -> None:
+        _fit_uniform_rbf(self.centers, samples, start_col, self.M)
+        h = (self.centers[start_col:, -1] - self.centers[start_col:, 0]) / (self.M - 1)
+        self.inv_h[start_col:, 0] = h.reciprocal()
 
     def l1_norm(self) -> torch.Tensor:
         return self.weight.abs().sum()
@@ -179,6 +255,7 @@ class BSplineBasis(nn.Module):
                  G: int = 9, k: int = 3, domain: float = 1.0):
         super().__init__()
         self.k = k
+        self.G = G
         h = 2 * domain / G
         # Vecteur de nœuds étendu (G + 2k + 1 nœuds), partagé entre toutes les arêtes.
         grid = (torch.arange(-k, G + k + 1, dtype=torch.float32) * h - domain)
@@ -203,8 +280,33 @@ class BSplineBasis(nn.Module):
         return bases                                         # (batch, in, G+k)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        basis = self._b_splines(x.clamp(self.grid[0, self.k], self.grid[0, -self.k - 1]))
+        # Bornes PAR ENTREE (la grille peut differer d'une entree a l'autre apres
+        # fit_grid) ; identique a l'ancien ecretage tant que toutes les lignes
+        # de la grille sont egales.
+        basis = self._b_splines(torch.clamp(x, self.grid[:, self.k], self.grid[:, -self.k - 1]))
         return _bmm_edges(basis, self.weight)
+
+    @torch.no_grad()
+    def fit_grid(self, samples: torch.Tensor, start_col: int,
+                 grid_eps: float = 0.02, margin: float = 0.01) -> None:
+        """Grille des colonnes start_col: recalee sur les donnees, regle exacte de
+        update_grid d'EfficientKAN (Blealtan, 2024) et de la mise a jour de grille
+        de Liu et al. (2024, section 2.2) : noeuds interieurs aux quantiles de
+        l'echantillon, melanges a une grille uniforme (poids grid_eps, qui garantit
+        des noeuds strictement croissants meme pour une variable binaire), puis k
+        noeuds d'extension de chaque cote. Seule la grille change : appelee avant
+        l'entrainement, les coefficients restent ceux de l'initialisation."""
+        x_sorted = torch.sort(samples.to(self.grid.dtype), dim=0).values      # (n, d)
+        n = x_sorted.shape[0]
+        idx = torch.linspace(0, n - 1, self.G + 1, dtype=torch.int64)
+        grid_adaptive = x_sorted[idx]                                          # (G+1, d)
+        uniform_step = (x_sorted[-1] - x_sorted[0] + 2 * margin) / self.G     # (d,)
+        grid_uniform = (torch.arange(self.G + 1, dtype=self.grid.dtype)[:, None] * uniform_step
+                        + x_sorted[0] - margin)
+        grid = grid_eps * grid_uniform + (1 - grid_eps) * grid_adaptive
+        ext = torch.arange(1, self.k + 1, dtype=self.grid.dtype)[:, None] * uniform_step
+        grid = torch.cat([grid[:1] - ext.flip(0), grid, grid[-1:] + ext], dim=0)   # (G+2k+1, d)
+        self.grid[start_col:] = grid.T
 
     def l1_norm(self) -> torch.Tensor:
         return self.weight.abs().sum()
@@ -369,7 +471,7 @@ class FourierBasis(nn.Module):
 # SincKAN  interpolation de Sinc multi-résolution (Sugihara & Matsuo, 2004)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class SincBasis(nn.Module):
+class SincBasis(_LegacyGridLoad, nn.Module):
     """
     SincKAN : interpolation de Sinc/Whittaker-Shannon, sinc(t) = sin(pi t)/(pi t)
     (sinc normalisé, sinc(0)=1 par convention torch.sinc). Convergence
@@ -393,27 +495,37 @@ class SincBasis(nn.Module):
 
     budget_kwargs = dict(N=6)
     native_kwargs = dict(N=6)
+    _per_input_buffers = ("centers", "inv_h")
 
     def __init__(self, in_features: int, out_features: int,
                  N: int = 6, domain: float = 1.0, h_coarse: float = None, h_fine: float = None):
         super().__init__()
         self.N = N
-        centers = torch.linspace(-domain, domain, N)
+        centers = torch.linspace(-domain, domain, N).repeat(in_features, 1)     # (in, N)
         self.register_buffer("centers", centers)
         base_h = 2 * domain / (N - 1)
         h1 = h_coarse if h_coarse is not None else base_h
         h2 = h_fine   if h_fine   is not None else base_h * 0.5
-        self.register_buffer("inv_h", torch.tensor([1.0 / float(h1), 1.0 / float(h2)]))
+        self._h_ratios = (h1 / base_h, h2 / base_h)
+        self.register_buffer("inv_h", torch.tensor([1.0 / float(h1), 1.0 / float(h2)])
+                             .repeat(in_features, 1))                           # (in, 2)
         self.weight = nn.Parameter(torch.randn(in_features, out_features, 2, N) * 0.1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_col = x.unsqueeze(-1).unsqueeze(-1)                          # (batch, in, 1, 1)
-        diff  = x_col - self.centers.view(1, 1, 1, -1)                 # (batch, in, 1, N)
-        t     = diff * self.inv_h.view(1, 1, 2, 1)                     # (batch, in, 2, N)
+        diff  = x_col - self.centers.unsqueeze(0).unsqueeze(2)         # (batch, in, 1, N)
+        t     = diff * self.inv_h.unsqueeze(0).unsqueeze(-1)           # (batch, in, 2, N)
         basis = torch.sinc(t)
         basis = basis.reshape(x.shape[0], x.shape[1], 2 * self.N)      # (batch, in, 2N)
         weight = self.weight.reshape(self.weight.shape[0], self.weight.shape[1], 2 * self.N)
         return _bmm_edges(basis, weight)
+
+    @torch.no_grad()
+    def fit_grid(self, samples: torch.Tensor, start_col: int) -> None:
+        _fit_uniform_rbf(self.centers, samples, start_col, self.N)
+        base_h = (self.centers[start_col:, -1] - self.centers[start_col:, 0]) / (self.N - 1)
+        for j, ratio in enumerate(self._h_ratios):
+            self.inv_h[start_col:, j] = (base_h * ratio).reciprocal()
 
     def l1_norm(self) -> torch.Tensor:
         return self.weight.abs().sum()

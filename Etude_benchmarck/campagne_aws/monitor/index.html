@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suivi campagne MKAN</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1d2330; --ink2: #5a6372; --line: #e3e6eb;
+  --accent: #2f6fd6; --accent-soft: #dbe7fb; --ok: #1f9d6b; --warn: #d08a12; --bad: #cf3f3f;
+  --track: #eceff3; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151b; --panel: #1a1e26; --ink: #e6e9ef; --ink2: #9aa3b2; --line: #2a303b;
+    --accent: #6ea2ff; --accent-soft: #23324d; --ok: #3fc48f; --warn: #e3a63a; --bad: #ef6b6b;
+    --track: #262c36;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151b; --panel: #1a1e26; --ink: #e6e9ef; --ink2: #9aa3b2; --line: #2a303b;
+  --accent: #6ea2ff; --accent-soft: #23324d; --ok: #3fc48f; --warn: #e3a63a; --bad: #ef6b6b;
+  --track: #262c36;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+       font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+         padding: 16px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+h1 { font-size: 18px; margin: 0; }
+h2 { font-size: 14px; margin: 0 0 10px; color: var(--ink2); font-weight: 600;
+     text-transform: uppercase; letter-spacing: .04em; }
+main { padding: 16px 24px 40px; display: grid; gap: 16px; max-width: 1500px; margin: 0 auto; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+         background: var(--accent-soft); color: var(--accent); margin-left: 8px; }
+.badge.bad { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.badge.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.muted { color: var(--ink2); font-size: 12px; }
+.grid4 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.grid2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+        min-width: 0; }
+.kpi { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.bar { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; margin-top: 8px; }
+.bar > i { display: block; height: 100%; background: var(--accent); border-radius: 999px;
+           transition: width .6s ease; }
+.bar.thin { height: 6px; margin-top: 4px; }
+.bar.warn > i { background: var(--warn); } .bar.bad > i { background: var(--bad); }
+.bar.ok > i { background: var(--ok); }
+.cores { display: grid; grid-template-columns: repeat(auto-fill, minmax(18px, 1fr)); gap: 3px; margin-top: 10px; }
+.cores span { height: 18px; border-radius: 3px; background: var(--track); }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--ink2); font-weight: 600; font-size: 12px; }
+tr.sel td { background: var(--accent-soft); }
+tbody tr { cursor: pointer; }
+td.num { text-align: right; font-family: var(--mono); font-size: 12.5px; }
+.state { font-size: 12px; font-weight: 600; }
+.state.entrainement { color: var(--accent); } .state.fini { color: var(--ok); }
+.state.echec, .state.interrompu { color: var(--bad); } .state.evaluation { color: var(--warn); }
+.prog { min-width: 140px; }
+.events { font-family: var(--mono); font-size: 12px; max-height: 180px; overflow: auto; white-space: pre-wrap;
+          color: var(--ink2); }
+#chartBox { position: relative; height: 280px; }
+button.theme { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 8px;
+               padding: 4px 10px; cursor: pointer; }
+@media (max-width: 600px) {
+  header, main { padding-left: 16px; padding-right: 16px; }
+  .grid2 { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Campagne MKAN <span id="phase" class="badge">…</span><span id="stop"></span></h1>
+       <div class="muted" id="updated">connexion…</div></div>
+  <button class="theme" id="themeBtn" type="button">Thème</button>
+</header>
+<main>
+  <section class="grid4">
+    <div class="card"><h2>Runs de la phase</h2><div class="kpi" id="kRuns">–</div>
+      <div class="bar"><i id="bRuns" style="width:0"></i></div><div class="muted" id="kRunsSub"></div></div>
+    <div class="card"><h2>Temps restant (phase)</h2><div class="kpi" id="kEta">–</div>
+      <div class="muted" id="kEtaSub">estimé sur les runs finis de la phase</div></div>
+    <div class="card"><h2>Coût cumulé</h2><div class="kpi" id="kCost">–</div>
+      <div class="bar" id="bCostWrap"><i id="bCost" style="width:0"></i></div><div class="muted" id="kCostSub"></div></div>
+    <div class="card"><h2>Charge de l'instance</h2><div class="kpi" id="kCpu">–</div>
+      <div class="bar"><i id="bCpu" style="width:0"></i></div><div class="muted" id="kCpuSub"></div>
+      <div class="cores" id="cores"></div></div>
+  </section>
+
+  <section class="card"><h2>Runs en cours et récents</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Run</th><th>État</th><th>Époques</th><th>Époque en cours</th>
+        <th class="num">Perte</th><th class="num">Fenêtres/s</th><th class="num">Fin d'époque</th>
+        <th class="num">Patience</th></tr></thead>
+      <tbody id="runs"></tbody></table></div>
+    <div class="muted" id="runsSub"></div>
+  </section>
+
+  <section class="grid2">
+    <div class="card"><h2>Courbes de perte <span class="muted" id="chartTitle">(cliquer sur un run)</span></h2>
+      <div id="chartBox"><canvas id="chart"></canvas></div></div>
+    <div class="card"><h2>Sauvegarde et instance</h2>
+      <div id="sentinel" class="muted"></div><div class="events" id="events"></div></div>
+  </section>
+
+  <section class="card"><h2>Classement par architecture</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>#</th><th>Phase</th><th>Cellule</th><th>Régime</th><th>Architecture</th>
+        <th class="num">Graines</th><th class="num">Fitness</th><th class="num">MCC</th>
+        <th class="num">PR-AUC</th><th class="num">Brier</th><th class="num">R² 0,99</th>
+        <th class="num">R² 0,80</th><th class="num">Latence (ms)</th><th class="num">Paramètres</th></tr></thead>
+      <tbody id="rank"></tbody></table></div>
+    <div class="muted" id="rankSub"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fx = (v, d = 3) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : Number(v).toFixed(d);
+const pct = (a, b) => b ? Math.min(100, 100 * a / b) : 0;
+function dur(s) {
+  if (s === null || s === undefined || !isFinite(s)) return "–";
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? `${h} h ${String(m).padStart(2, "0")}` : `${m} min ${String(s % 60).padStart(2, "0")}`;
+}
+try { const t = localStorage.getItem("mkan-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+$("themeBtn").onclick = () => {
+  const cur = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = cur;
+  try { localStorage.setItem("mkan-theme", cur); } catch (e) {}
+};
+let selected = null, chart = null, lastRuns = [];
+
+function coreColor(p) {
+  const css = getComputedStyle(document.documentElement);
+  const c = p > 85 ? css.getPropertyValue("--ok") : p > 40 ? css.getPropertyValue("--accent") : css.getPropertyValue("--track");
+  return `color-mix(in srgb, ${c.trim()} ${Math.max(25, p)}%, ${css.getPropertyValue("--track").trim()})`;
+}
+
+function drawChart(run) {
+  if (!run) return;
+  $("chartTitle").textContent = run.label;
+  const n = Math.max(run.train_loss?.length || 0, run.monitor_loss?.length || 0);
+  const labels = Array.from({length: n}, (_, i) => i + 1);
+  const css = getComputedStyle(document.documentElement);
+  const data = {labels, datasets: [
+    {label: "entraînement", data: run.train_loss || [], borderColor: css.getPropertyValue("--accent").trim(), tension: .25},
+    {label: "validation (suivi)", data: run.monitor_loss || [], borderColor: css.getPropertyValue("--warn").trim(), tension: .25}]};
+  if (!chart) {
+    chart = new Chart($("chart"), {type: "line", data, options: {animation: false, maintainAspectRatio: false,
+      interaction: {mode: "index", intersect: false},
+      scales: {x: {title: {display: true, text: "époque"}}, y: {title: {display: true, text: "perte"}}}}});
+  } else { chart.data = data; chart.update("none"); }
+}
+
+function render(st) {
+  const sc = st.scheduler || {};
+  $("phase").textContent = sc.phase || "aucune phase";
+  $("stop").innerHTML = st.stop ? '<span class="badge bad">arrêt demandé</span>' : "";
+  const age = st.scheduler_age_s;
+  $("updated").textContent = `mis à jour ${new Date(st.now).toLocaleTimeString("fr-FR")}` +
+    (age !== null && age !== undefined ? ` · ordonnanceur vu il y a ${Math.round(age)} s` : " · ordonnanceur absent");
+
+  const done = sc.n_done || 0, total = sc.total || 0;
+  $("kRuns").textContent = total ? `${done} / ${total}` : "–";
+  $("bRuns").style.width = pct(done, total) + "%";
+  $("kRunsSub").textContent = `${(sc.running || []).length} en cours · ${Object.keys(sc.failed || {}).length} en échec · ${st.n_runs_done} finis toutes phases`;
+  $("kEta").textContent = dur(st.eta_phase_s);
+
+  const c = st.cost || {}, budget = st.budget_usd || 80;
+  $("kCost").textContent = c.total_usd !== undefined ? `${fx(c.total_usd, 2)} $` : "–";
+  const cp = pct(c.total_usd || 0, budget);
+  $("bCost").style.width = cp + "%";
+  $("bCostWrap").className = "bar " + (cp > 80 ? "bad" : cp > 50 ? "warn" : "ok");
+  $("kCostSub").textContent = `sur ${budget} $ · ${c.price_usd_h ? fx(c.price_usd_h, 3) + " $/h" : "prix inconnu"} · ${fx(c.hours || 0, 1)} h · arrêt à ${fx(c.stop_at_usd, 0)} $`;
+
+  const s = st.system || {};
+  $("kCpu").textContent = `${fx(s.cpu_total, 0)} %`;
+  $("bCpu").style.width = (s.cpu_total || 0) + "%";
+  $("kCpuSub").textContent = `${s.n_cores} cœurs · charge ${fx(s.load_avg?.[0], 1)} · mémoire ${s.mem_used_gb}/${s.mem_total_gb} Go · disque ${s.disk_used_gb}/${s.disk_total_gb} Go · ${s.n_train_procs} processus`;
+  $("cores").innerHTML = (s.cpu_per_core || []).map((p, i) =>
+    `<span title="cœur ${i} : ${p.toFixed(0)} %" style="background:${coreColor(p)}"></span>`).join("");
+
+  lastRuns = st.runs || [];
+  const shown = lastRuns.filter(r => r.state !== "fini").concat(lastRuns.filter(r => r.state === "fini").slice(-8));
+  $("runs").innerHTML = shown.map(r => {
+    const ep = pct(r.epoch || 0, r.max_epochs), bt = pct(r.batch || 0, r.n_batches);
+    const last = r.train_loss?.length ? r.train_loss[r.train_loss.length - 1] : null;
+    return `<tr data-id="${esc(r.run_id)}" class="${r.run_id === selected ? "sel" : ""}">
+      <td>${esc(r.label)}${r.stale ? ' <span class="badge bad">muet</span>' : ""}</td>
+      <td class="state ${esc(r.state)}">${esc(r.state)}</td>
+      <td class="prog">${r.epoch || 0} / ${r.max_epochs}<div class="bar thin ok"><i style="width:${ep}%"></i></div></td>
+      <td class="prog">${r.state === "entrainement" ? fx(bt, 0) + " %" : "–"}<div class="bar thin"><i style="width:${r.state === "entrainement" ? bt : 0}%"></i></div></td>
+      <td class="num">${fx(r.running_loss ?? last, 4)}</td>
+      <td class="num">${fx(r.windows_per_s, 0)}</td>
+      <td class="num">${r.state === "entrainement" ? dur(r.eta_epoch_s) : "–"}</td>
+      <td class="num">${r.wait ?? 0} / ${r.patience}</td></tr>`;
+  }).join("");
+  $("runsSub").textContent = `${lastRuns.filter(r => r.state === "fini").length} runs finis (les 8 derniers affichés).`;
+  document.querySelectorAll("#runs tr").forEach(tr => tr.onclick = () => {
+    selected = tr.dataset.id; drawChart(lastRuns.find(r => r.run_id === selected)); render(st);
+  });
+  if (selected) drawChart(lastRuns.find(r => r.run_id === selected));
+
+  const se = st.sentinel || {};
+  $("sentinel").innerHTML = `Instance ${esc(se.instance_type || "?")} (${esc(se.lifecycle || "?")}, ${esc(se.az || "?")}) · dernière copie S3 : ` +
+    (se.last_sync ? `${new Date(se.last_sync).toLocaleTimeString("fr-FR")} ${se.last_sync_ok ? '<span class="badge ok">ok</span>' : '<span class="badge bad">échec</span>'} (${se.last_sync_s} s)` : "aucune") +
+    (se.spot_notice ? ` · <span class="badge bad">préavis spot</span>` : "");
+  $("events").textContent = (se.events || []).slice().reverse().join("\n");
+
+  $("rank").innerHTML = (st.ranking || []).map((t, i) => `<tr>
+    <td>${i + 1}</td><td>${esc(t.phase.replace("etape4_", ""))}</td><td>${t.cell_type === "lstm" ? "TKAN" : "GRU"}</td>
+    <td>${esc(t.regime)}</td><td>${esc(t.architecture)}</td><td class="num">${t.n_seeds}</td>
+    <td class="num">${fx(t.fitness, 4)} ± ${fx(t.fitness_std, 4)}${t.fitness_provisoire ? " *" : ""}</td>
+    <td class="num">${fx(t.mcc?.[0], 4)}</td><td class="num">${fx(t.auc_pr?.[0], 4)}</td><td class="num">${fx(t.brier?.[0], 4)}</td>
+    <td class="num">${fx(t.r2_symbolic?.[0], 3)}</td><td class="num">${fx(t.r2_alt?.[0], 3)}</td>
+    <td class="num">${fx(t.latency_ms?.[0], 1)}</td><td class="num">${fx(t.n_params?.[0], 0)}</td></tr>`).join("");
+  $("rankSub").textContent = `* fitness sans le terme de latence (mesure faite entre deux phases, machine au repos). Seuil de latence : ${st.latency_threshold_ms} ms.`;
+}
+
+async function tick() {
+  try {
+    const r = await fetch("/api/state", {cache: "no-store"});
+    render(await r.json());
+  } catch (e) { $("updated").textContent = "connexion perdue, nouvelle tentative…"; }
+  setTimeout(tick, 2000);
+}
+tick();
+</script>
+</body>
+</html>
