@@ -138,6 +138,10 @@ def main():
     ap.add_argument("--hidden", nargs="+", type=int, default=[32, 48, 64])
     ap.add_argument("--threads", nargs="+", type=int, default=[1, 2, 4])
     ap.add_argument("--quick", action="store_true", help="moins de lots par mesure")
+    ap.add_argument("--combos", nargs="+", metavar="PxT",
+                    help="mesure seulement le debit total de ces repartitions (ex. 32x1 32x2 16x4), "
+                         "en completant bench_results.json")
+    ap.add_argument("--combo_batches", type=int, default=40)
     args = ap.parse_args()
     if args.worker:
         a, h, t, nb, w = args.worker
@@ -155,6 +159,31 @@ def main():
     def save():
         with open(path, "w", encoding="utf-8") as f:
             json.dump(res, f, indent=1)
+
+    if args.combos:
+        # Repartitions processus x threads mesurees directement (le meilleur
+        # debit par coeur en processus seul ne predit pas le debit en charge :
+        # 64 vCPU = 32 coeurs physiques, bande passante memoire partagee).
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                res = json.load(f)
+        res.setdefault("combos", {})
+        for h in args.hidden:
+            for arch in ARCHS:
+                for combo in args.combos:
+                    p, t = (int(v) for v in combo.split("x"))
+                    key = f"{h}|{arch}|{combo}"
+                    if key in res["combos"]:
+                        continue
+                    rs = _run_workers(arch, h, t, p, args.combo_batches, 5)
+                    tot = sum(r["windows_per_s"] for r in rs)
+                    res["combos"][key] = {"hidden_tkan": h, "arch": arch, "n_proc": p, "threads": t,
+                                          "total_windows_per_s": tot}
+                    print(f"  {arch:14s} h={h:3d} {combo:>5s} : {tot:8.0f} fen/s au total "
+                          f"({tot / p:6.1f} par processus)", flush=True)
+                    save()
+        print(f"\nResultats : {path}")
+        return
 
     print("1/3 latence (machine au repos)", flush=True)
     lat_threads = int(os.environ.get("MKAN_LATENCY_THREADS", "4"))

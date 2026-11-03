@@ -12,6 +12,9 @@ REPO="${MKAN_REPO:-https://github.com/Dr-MKO-4/MKAN.git}"
 BRANCH="${MKAN_BRANCH:-main}"
 ROOT="$HOME/Modelisation"
 
+# Sans « linger », systemd arrete le gestionnaire de session de l'utilisateur a la
+# derniere deconnexion SSH et tue les sessions tmux avec lui (constate le 03/11).
+sudo loginctl enable-linger "$USER"
 sudo apt-get update -y
 sudo apt-get install -y python3-venv python3-dev git tmux htop unzip curl
 if ! command -v aws >/dev/null; then
