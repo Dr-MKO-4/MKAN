@@ -49,7 +49,7 @@ LATENCY_CAPPED = True
 
 # ── Nouvelle Etape 4 ──
 ETAPE4 = dict(
-    n_windows_train=int(os.environ.get("MKAN_N_TRAIN", "300000")),  # decision du 03/11
+    n_windows_train=int(os.environ.get("MKAN_N_TRAIN", "500000")),  # decision du 03/11 (revisee)
     max_epochs=15,          # valide le 03/11 (Etape 4 du 21/10 : 10 epoques fixes)
     patience=3,             # valide le 03/11 (arret anticipe sur la perte de suivi)
     min_delta=1e-4,
