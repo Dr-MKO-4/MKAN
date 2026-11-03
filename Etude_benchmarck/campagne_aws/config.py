@@ -49,9 +49,9 @@ LATENCY_CAPPED = True
 
 # ── Nouvelle Etape 4 ──
 ETAPE4 = dict(
-    n_windows_train=int(os.environ.get("MKAN_N_TRAIN", "300000")),  # fixe apres le banc d'essai
-    max_epochs=15,          # A VALIDER (Etape 4 du 21/10 : 10 epoques fixes)
-    patience=3,             # A VALIDER (arret anticipe sur la perte de suivi)
+    n_windows_train=int(os.environ.get("MKAN_N_TRAIN", "300000")),  # decision du 03/11
+    max_epochs=15,          # valide le 03/11 (Etape 4 du 21/10 : 10 epoques fixes)
+    patience=3,             # valide le 03/11 (arret anticipe sur la perte de suivi)
     min_delta=1e-4,
     n_monitor=50_000,       # fenetres de validation suivies pour l'arret anticipe
     n_seeds=5,
@@ -67,6 +67,9 @@ FINAL = dict(
     n_monitor=50_000,
     seeds=[1, 2, 3, 4, 5],
 )
+
+# ── Execution : torch.compile (memes formules, operations fusionnees) ──
+COMPILE = os.environ.get("MKAN_COMPILE", "1") == "1"
 
 # ── Sauvegarde et reprise ──
 CHECKPOINT_EVERY_S = 300          # point de reprise intra-epoque (en plus de chaque fin d'epoque)

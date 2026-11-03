@@ -16,9 +16,10 @@ ROOT="$HOME/Modelisation"
 # derniere deconnexion SSH et tue les sessions tmux avec lui (constate le 03/11).
 sudo loginctl enable-linger "$USER"
 sudo apt-get update -y
-sudo apt-get install -y python3-venv python3-dev git tmux htop unzip curl
+# build-essential : compilateur C++ requis par torch.compile (inductor CPU)
+sudo apt-get install -y python3-venv python3-dev git tmux htop unzip curl build-essential
 if ! command -v aws >/dev/null; then
-  curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip
   unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install
 fi
 

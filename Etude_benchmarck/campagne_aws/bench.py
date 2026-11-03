@@ -61,6 +61,7 @@ def worker(arch: str, hidden: int, threads: int, n_batches: int, warmup: int) ->
     torch.manual_seed(0)
     model = build_model(spec, INPUT_SIZE)
     opt = torch.optim.Adam(model.parameters(), lr=spec["lr"])
+    fwd = torch.compile(model, dynamic=False) if os.environ.get("MKAN_COMPILE") == "1" else model
     bs, W = spec["batch_size"], spec["W"]
     xs = torch.randn(n_batches + warmup, bs, W, INPUT_SIZE).clamp(-4, 4)
     ys = (torch.rand(n_batches + warmup, bs) < 0.2).float()
@@ -69,7 +70,7 @@ def worker(arch: str, hidden: int, threads: int, n_batches: int, warmup: int) ->
         if b == warmup:
             t0 = time.perf_counter()
         opt.zero_grad(set_to_none=True)
-        loss, _, _, _ = mkan_total_loss(model, xs[b], ys[b], lam=spec["lam"], mu1=spec["mu1"],
+        loss, _, _, _ = mkan_total_loss(fwd, xs[b], ys[b], lam=spec["lam"], mu1=spec["mu1"],
                                         mu2=spec["mu2"])
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)

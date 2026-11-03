@@ -147,7 +147,7 @@ def train(spec: dict, run_dir: str, threads: int) -> int:
         "state": "chargement", "pid": os.getpid(), "threads": threads, "started": _now(),
         "epoch": 0, "max_epochs": spec["max_epochs"], "batch": 0, "n_batches": 0,
         "train_loss": [], "monitor_loss": [], "best_epoch": 0, "wait": 0,
-        "patience": spec["patience"]})
+        "patience": spec["patience"], "compiled": config.COMPILE})
     status(force=True)
 
     data = load_dataset(spec["data_dir"])
@@ -165,6 +165,10 @@ def train(spec: dict, run_dir: str, threads: int) -> int:
         fit_grids_to_data(model, torch.from_numpy(np.array(data["grid_samples"])))
     opt = torch.optim.Adam(model.parameters(), lr=spec["lr"])
     gen = torch.Generator().manual_seed(spec["seed"])
+    # torch.compile : memes formules, operations fusionnees (debit x1,3 a x1,4 mesure,
+    # ecart d'arrondi flottant seulement, cf. 01_aws_notes_techniques.md § 10). Le
+    # modele compile partage les parametres du modele : checkpoints inchanges.
+    fwd = torch.compile(model, dynamic=False) if config.COMPILE else model
 
     ckpt_path = os.path.join(run_dir, "checkpoint.pt")
     st = dict(epoch=0, batch=0, perm=None, loss_sum=0.0, n_seen=0, best_loss=float("inf"),
@@ -218,7 +222,7 @@ def train(spec: dict, run_dir: str, threads: int) -> int:
             xb = torch.from_numpy(np.asarray(X_tr[idx]))
             yb = torch.from_numpy(np.asarray(y_tr[idx]))
             opt.zero_grad(set_to_none=True)
-            loss, _, _, _ = mkan_total_loss(model, xb, yb, lam=spec["lam"], mu1=spec["mu1"],
+            loss, _, _, _ = mkan_total_loss(fwd, xb, yb, lam=spec["lam"], mu1=spec["mu1"],
                                             mu2=spec["mu2"])
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=spec["clip_grad_norm"])
