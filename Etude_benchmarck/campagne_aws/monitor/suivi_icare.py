@@ -50,13 +50,14 @@ def systeme(icare):
             "n_processus": len(calc), "n_processus_actifs": sum(c > 50 for c in calc)}
 
 
-def commande():
-    """Arguments de la commande run.py en cours (None si la chaine est arretee ou entre deux commandes)."""
+def commandes():
+    """Arguments des commandes run.py en cours (essai reduit et execution complete peuvent tourner ensemble)."""
+    out = []
     for p in psutil.process_iter(["cmdline"]):
         c = p.info["cmdline"] or []
         if len(c) >= 2 and c[0].endswith("python") and c[1] == "run.py":
-            return " ".join(c[2:]) or "toutes les étapes"
-    return None
+            out.append(" ".join(c[2:]) or "toutes les étapes")
+    return out
 
 
 def barre(log):
@@ -121,7 +122,9 @@ def main():
     ap.add_argument("--every", type=float, default=30.0)
     ap.add_argument("--statut_every", type=float, default=300.0)
     a = ap.parse_args()
-    log = os.path.join(a.icare, "resultats", "chaine.log")
+    # journaux suivis : (source, fichier) ; le calibrage complet lance a part ecrit dans calibrage.log
+    logs = [("chaîne", os.path.join(a.icare, "resultats", "chaine.log")),
+            ("calibrage complet", os.path.join(a.icare, "resultats", "calibrage.log"))]
     dest = os.path.join(a.icare, "resultats", "statut.json")
     psutil.cpu_percent(percpu=True)
     for p in psutil.process_iter():
@@ -131,17 +134,26 @@ def main():
             pass
     st_complet, st_rapide, t_statut = None, None, 0.0
     while True:
-        cmd = commande()
+        cmds = commandes()
         if time.time() - t_statut > a.statut_every:
             try:
                 st_complet, st_rapide = statut(a.icare, False), statut(a.icare, True)
             except (subprocess.SubprocessError, OSError):
                 pass
             t_statut = time.time()
-        b, controle = barre(log)
+        barres, controle = [], []
+        for source, log in logs:
+            b, c = barre(log)
+            if b:
+                barres.append({"source": source, "maj": os.path.getmtime(log), **b})
+            controle += c
+        barres.sort(key=lambda b: -b["maj"])
+        complet = [b for b in barres if b["source"] == "calibrage complet" or "--rapide" not in " ".join(cmds)]
+        rapide = bool(cmds) and all("--rapide" in c for c in cmds)
         rec, debit = recentes(a.icare)
-        etat = {"updated": _now(), "commande": cmd, "rapide": bool(cmd and "--rapide" in cmd),
-                "systeme": systeme(a.icare), "barre": b, "controle": controle,
+        etat = {"updated": _now(), "commande": " | ".join(cmds) or None, "commandes": cmds, "rapide": rapide,
+                "systeme": systeme(a.icare), "barres": barres,
+                "barre": (complet or barres or [None])[0], "controle": controle[-8:],
                 "etapes_complet": st_complet, "etapes_rapide": st_rapide,
                 "recentes": rec, "unites_derniere_heure": debit,
                 # champs lus par l'ancienne carte (texte brut)
