@@ -127,9 +127,56 @@ def _projects() -> list:
     for name, prefix, budget in OTHER_PROJECTS:
         out.append({"name": name, "budget_usd": float(budget),
                     "cost": _s3_json(f"{prefix}/sorties/cost_state.json") or {},
-                    "status": _s3_json(f"{prefix}/sorties/statut.json") or {},
+                    "status": _s3_json(f"{prefix}/sorties/statut.json", ttl=20.0) or {},
                     "sentinel": _s3_json(f"{prefix}/sorties/sentinel_state.json") or {}})
     return out
+
+
+# Historique (charge CPU et avancement des deux projets), echantillonne toutes les 30 s par un fil
+# d'arriere-plan et garde sur disque pour survivre a un redemarrage du suivi (24 h au plus).
+HIST_PATH = os.path.join(config.OUT_DIR, "historique_suivi.json")
+HIST_MAX = 24 * 120
+_hist = _read(HIST_PATH, []) or []
+
+
+def _echantillon():
+    sched = _read(os.path.join(config.OUT_DIR, "scheduler_state.json"), {}) or {}
+    pt = {"t": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+          "mkan_cpu": psutil.cpu_percent(interval=1.0),
+          "mkan_pct": round(100 * sched.get("n_done", 0) / sched["total"], 2) if sched.get("total") else None,
+          "mkan_phase": sched.get("phase")}
+    for name, prefix, _ in OTHER_PROJECTS:
+        s = _s3_json(f"{prefix}/sorties/statut.json", ttl=20.0) or {}
+        b = s.get("barre") or {}
+        pt[f"{prefix}_cpu"] = (s.get("systeme") or {}).get("cpu_total")
+        pt[f"{prefix}_pct"] = b.get("pct")
+        pt[f"{prefix}_etape"] = b.get("etape")
+    return pt
+
+
+def _historiser():
+    while True:
+        try:
+            _hist.append(_echantillon())
+            del _hist[:-HIST_MAX]
+            tmp = HIST_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(_hist, f)
+            os.replace(tmp, HIST_PATH)
+        except Exception:                      # le suivi ne doit jamais tomber pour un echantillon manque
+            pass
+        time.sleep(29)
+
+
+@app.on_event("startup")
+def _demarrer_historique():
+    import threading
+    threading.Thread(target=_historiser, daemon=True).start()
+
+
+@app.get("/api/history")
+def history():
+    return JSONResponse({"points": _hist, "projects": [{"name": n, "prefix": p} for n, p, _ in OTHER_PROJECTS]})
 
 
 @app.get("/api/state")
