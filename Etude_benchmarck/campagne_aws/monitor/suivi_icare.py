@@ -57,7 +57,7 @@ def commandes():
     out = []
     for p in psutil.process_iter(["cmdline"]):
         c = p.info["cmdline"] or []
-        if len(c) >= 2 and c[0].endswith("python") and c[1] == "run.py":
+        if len(c) >= 2 and "python" in os.path.basename(c[0]) and c[1].endswith("run.py"):
             out.append(" ".join(c[2:]) or "toutes les étapes")
     return out
 
