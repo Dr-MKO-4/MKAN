@@ -67,6 +67,14 @@ td.num { text-align: right; font-family: var(--mono); font-size: 12.5px; }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink2); margin-bottom: 6px; }
 .legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
 .card h2 .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { background: none; border: 0; color: var(--ink2); padding: 5px 12px; cursor: pointer; font: inherit; font-size: 13px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+body[data-filtre="icare"] [data-proj="mkan"], body[data-filtre="mkan"] [data-proj="icare"] { display: none !important; }
+#projects { align-items: start; }
+body[data-filtre="icare"] #projects { grid-template-columns: 1fr; }
 button.theme { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 8px;
                padding: 4px 10px; cursor: pointer; }
 @media (max-width: 600px) {
@@ -77,12 +85,17 @@ button.theme { background: none; border: 1px solid var(--line); color: var(--ink
 </head>
 <body>
 <header>
-  <div><h1>Campagne MKAN <span id="phase" class="badge">…</span><span id="stop"></span></h1>
+  <div><h1>Suivi des calculs <span id="phase" class="badge" data-proj="mkan">…</span><span id="stop"></span></h1>
        <div class="muted" id="updated">connexion…</div></div>
-  <button class="theme" id="themeBtn" type="button">Thème</button>
+  <div class="tools">
+    <div class="seg" id="filtre" role="group" aria-label="Projet affiché">
+      <button type="button" data-f="tout">Tout</button><button type="button" data-f="mkan">Mémoire MKAN</button><button type="button" data-f="icare">Icare</button>
+    </div>
+    <button class="theme" id="themeBtn" type="button">Thème</button>
+  </div>
 </header>
 <main>
-  <section class="grid4">
+  <section class="grid4" data-proj="mkan">
     <div class="card"><h2>Runs de la phase</h2><div class="kpi" id="kRuns">–</div>
       <div class="bar"><i id="bRuns" style="width:0"></i></div><div class="muted" id="kRunsSub"></div></div>
     <div class="card"><h2>Temps restant (phase)</h2><div class="kpi" id="kEta">–</div>
@@ -107,7 +120,7 @@ button.theme { background: none; border: 1px solid var(--line); color: var(--ink
       <div class="muted" id="pctSub"></div></div>
   </section>
 
-  <section class="card"><h2>Runs en cours et récents</h2>
+  <section class="card" data-proj="mkan"><h2>Runs en cours et récents</h2>
     <div class="scroll"><table>
       <thead><tr><th>Run</th><th>État</th><th>Époques</th><th>Époque en cours</th>
         <th class="num">Perte</th><th class="num">Fenêtres/s</th><th class="num">Fin d'époque</th>
@@ -116,14 +129,14 @@ button.theme { background: none; border: 1px solid var(--line); color: var(--ink
     <div class="muted" id="runsSub"></div>
   </section>
 
-  <section class="grid2">
+  <section class="grid2" data-proj="mkan">
     <div class="card"><h2>Courbes de perte <span class="muted" id="chartTitle">(cliquer sur un run)</span></h2>
       <div class="legend" id="legLoss"></div><div id="chartBox"><canvas id="chart"></canvas></div></div>
     <div class="card"><h2>Sauvegarde et instance</h2>
       <div id="sentinel" class="muted"></div><div class="events" id="events"></div></div>
   </section>
 
-  <section class="card"><h2>Classement par architecture</h2>
+  <section class="card" data-proj="mkan"><h2>Classement par architecture</h2>
     <div class="scroll"><table>
       <thead><tr><th>#</th><th>Phase</th><th>Cellule</th><th>Régime</th><th>Architecture</th>
         <th class="num">Graines</th><th class="num">Fitness</th><th class="num">MCC</th>
@@ -154,6 +167,20 @@ $("themeBtn").onclick = () => {
   if (lastHist) drawHistory(lastHist);
 };
 let selected = null, chart = null, lastRuns = [];
+// Filtre de projet (Tout, Mémoire MKAN, Icare), mémorisé dans le navigateur
+let filtre = "tout", lastHist = null;
+try { filtre = localStorage.getItem("suivi-filtre") || "tout"; } catch (e) {}
+const filtreUrl = new URLSearchParams(location.search).get("filtre");       // lien direct : ?filtre=icare
+if (["tout", "mkan", "icare"].includes(filtreUrl)) filtre = filtreUrl;
+function appliquerFiltre(f) {
+  filtre = f;
+  document.body.dataset.filtre = f;
+  document.querySelectorAll("#filtre button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.f === f)));
+  try { localStorage.setItem("suivi-filtre", f); } catch (e) {}
+  if (lastHist) drawHistory(lastHist);
+}
+document.querySelectorAll("#filtre button").forEach(b => b.onclick = () => appliquerFiltre(b.dataset.f));
+appliquerFiltre(filtre);
 
 function coreColor(p) {
   const css = getComputedStyle(document.documentElement);
@@ -199,23 +226,24 @@ function drawChart(run) {
   chart = upsert(chart, "chart", data, options("perte", "époque"));
 }
 
-let chCpu = null, chPct = null, lastHist = null;
+let chCpu = null, chPct = null;
 const hhmm = t => new Date(t).toLocaleTimeString("fr-FR", {hour: "2-digit", minute: "2-digit"});
 function drawHistory(h) {
   lastHist = h;
   const pts = h.points || [], labels = pts.map(p => hhmm(p.t));
-  const others = h.projects || [];
-  const items = [["Mémoire MKAN", tok("--s1")]].concat(others.map(o => [o.name, tok("--s2")]));
-  const cpu = {labels, datasets: [serie("Mémoire MKAN", pts.map(p => p.mkan_cpu), tok("--s1"))]
+  const others = (h.projects || []).filter(o => filtre === "tout" || filtre === o.prefix);
+  const voirMkan = filtre === "tout" || filtre === "mkan";
+  const items = (voirMkan ? [["Mémoire MKAN", tok("--s1")]] : []).concat(others.map(o => [o.name, tok("--s2")]));
+  const cpu = {labels, datasets: (voirMkan ? [serie("Mémoire MKAN", pts.map(p => p.mkan_cpu), tok("--s1"))] : [])
     .concat(others.map(o => serie(o.name, pts.map(p => p[`${o.prefix}_cpu`] ?? null), tok("--s2"))))};
-  const prog = {labels, datasets: [serie("Mémoire MKAN", pts.map(p => p.mkan_pct), tok("--s1"))]
+  const prog = {labels, datasets: (voirMkan ? [serie("Mémoire MKAN", pts.map(p => p.mkan_pct), tok("--s1"))] : [])
     .concat(others.map(o => serie(o.name, pts.map(p => p[`${o.prefix}_pct`] ?? null), tok("--s2"))))};
   legend("legCpu", items); legend("legPct", items);
   const pr = {min: 0, max: 100};
   chCpu = upsert(chCpu, "chCpu", cpu, options("%", "", pr));
   chPct = upsert(chPct, "chPct", prog, options("%", "", pr));
   const last = pts[pts.length - 1] || {};
-  $("pctSub").textContent = pts.length ? `MKAN : ${last.mkan_phase || "–"}` +
+  $("pctSub").textContent = pts.length ? (voirMkan ? `MKAN : ${last.mkan_phase || "–"}` : "") +
     others.map(o => ` · ${o.name} : ${last[`${o.prefix}_etape`] || "–"}`).join("") +
     ` · ${pts.length} points depuis ${hhmm(pts[0].t)}` : "historique en cours de constitution";
 }
@@ -280,7 +308,7 @@ function render(st) {
   $("cores").innerHTML = (s.cpu_per_core || []).map((p, i) =>
     `<span title="cœur ${i} : ${p.toFixed(0)} %" style="background:${coreColor(p)}"></span>`).join("");
 
-  const projs = [{name: "Mémoire MKAN", budget_usd: budget, cost: c, sentinel: st.sentinel || {},
+  const projs = [{name: "Mémoire MKAN", prefix: "mkan", budget_usd: budget, cost: c, sentinel: st.sentinel || {},
                   status: {statut: `${sc.phase || "aucune phase"} : ${done} / ${total} runs finis, ${(sc.running || []).length} en cours`}}]
                 .concat(st.projects || []);
   let spent = 0, budgets = 0;
@@ -295,7 +323,7 @@ function render(st) {
     const detail = p.status?.systeme ? projectDetail(p.status)
       : `<div class="muted" style="margin-top:8px;font-family:var(--mono);font-size:12px">${lines}</div>
       ${last ? `<div class="muted" style="margin-top:6px;font-family:var(--mono);font-size:12px">${last.slice(-160)}</div>` : ""}`;
-    return `<div class="card"><h2>${esc(p.name)}</h2>
+    return `<div class="card" data-proj="${esc(p.prefix)}"><h2>${esc(p.name)}</h2>
       <div class="kpi">${u === null ? "–" : fx(u, 2) + " $"} <span class="muted">/ ${b} $</span></div>
       <div class="bar ${pp > 80 ? "bad" : pp > 50 ? "warn" : "ok"}"><i style="width:${pp}%"></i></div>
       <div class="muted">${esc(p.sentinel?.instance_type || "?")} (${esc(p.sentinel?.lifecycle || "?")}) · ${p.cost?.price_usd_h ? fx(p.cost.price_usd_h, 3) + " $/h" : "prix inconnu"} · ${fx(p.cost?.hours || 0, 1)} h${age}</div>

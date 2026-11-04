@@ -125,7 +125,7 @@ def _s3_json(key: str, ttl: float = 60.0):
 def _projects() -> list:
     out = []
     for name, prefix, budget in OTHER_PROJECTS:
-        out.append({"name": name, "budget_usd": float(budget),
+        out.append({"name": name, "prefix": prefix, "budget_usd": float(budget),
                     "cost": _s3_json(f"{prefix}/sorties/cost_state.json") or {},
                     "status": _s3_json(f"{prefix}/sorties/statut.json", ttl=20.0) or {},
                     "sentinel": _s3_json(f"{prefix}/sorties/sentinel_state.json") or {}})
