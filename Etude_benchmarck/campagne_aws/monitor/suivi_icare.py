@@ -26,8 +26,10 @@ from datetime import datetime, timedelta, timezone
 
 import psutil
 
-BARRE = re.compile(r"^(?P<etape>\S+)\s+\[[#.]+\]\s+(?P<faites>\d+)/(?P<total>\d+)\s+(?P<pct>[\d.]+) %\s+"
-                   r"(?P<temps>.*?)(?:\s{2,}(?P<info>\S.*?))?\s*$")
+# Deux formats de progression.Barre : « ... 12.3 %  5 min écoulées, reste ~1 h  info » (code du 22/10)
+# et « ... 12.3 % | 5 min, reste ~1 h | info » (code du 04/11)
+BARRE = re.compile(r"^(?P<etape>\S+)\s+\[[#.]+\]\s+(?P<faites>\d+)/(?P<total>\d+)\s+(?P<pct>[\d.]+) %\s*(?:\|\s*)?"
+                   r"(?P<temps>.*?)(?:\s*\|\s*|\s{2,})(?P<info>\S.*?)?\s*$")
 STATUT = re.compile(r"^(?P<etape>\S+)\s+:\s+(?P<faites>\d+)\s+/\s+(?P<total>\d+) unit")
 
 
