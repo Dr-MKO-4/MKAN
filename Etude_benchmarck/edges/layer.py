@@ -100,6 +100,25 @@ class GenericKANLayer(nn.Module):
 
 
 @torch.no_grad()
+def etendre_modele(model: nn.Module, regions: list, input_size: int, delta: int,
+                   x_samples: torch.Tensor) -> int:
+    """Grid Extension sur toutes les portes. regions : [(indice dans x, x_l, x_r)] ; x_samples :
+    (n, input_size), completes pour les colonnes h par une grille uniforme de [-1, 1]. Les bases
+    sans extension (lineaire) sont laissees telles quelles. A appeler AVANT de creer l'optimiseur."""
+    n_etendues = 0
+    for layer in model.modules():
+        if not isinstance(layer, GenericKANLayer) or not hasattr(layer.basis, "extend"):
+            continue
+        n_h = layer.in_features - input_size
+        h = torch.linspace(-1.0, 1.0, x_samples.shape[0], dtype=x_samples.dtype)[:, None].repeat(1, n_h)
+        complet = torch.cat([h, x_samples.to(h.dtype)], dim=1)
+        for indice, x_l, x_r in regions:
+            layer.basis.extend(n_h + indice, x_l, x_r, delta, complet)
+            n_etendues += 1
+    return n_etendues
+
+
+@torch.no_grad()
 def fit_grids_to_data(model: nn.Module, x_samples: torch.Tensor) -> int:
     """Recale sur les donnees la grille des bases a grille de toutes les portes
     du modele (correctif du domaine, 2026-11-03, cf. bases.py).

@@ -68,6 +68,18 @@ def measure_pending(out_dir: str, threads: int, force: bool = False) -> int:
         lat_path = os.path.join(run_dir, "latency.json")
         if os.path.exists(lat_path) and not force:
             continue
+        with open(os.path.join(run_dir, "spec.json"), encoding="utf-8") as f:
+            if json.load(f).get("baseline"):
+                from train_baseline import mesure_latence     # meme lot de 256 fenetres
+                lat = mesure_latence(run_dir)
+                with open(lat_path + ".tmp", "w", encoding="utf-8") as g:
+                    json.dump({"latency_ms": lat, "threads": threads, "batch": 256, "repeats": 3,
+                               "threshold_ms": config.LATENCY_THRESHOLD_MS,
+                               "machine": platform.processor() or platform.machine(),
+                               "measured": time.strftime("%Y-%m-%dT%H:%M:%S")}, g)
+                os.replace(lat_path + ".tmp", lat_path)
+                n += 1
+                continue
         ck = torch.load(os.path.join(run_dir, "model.pt"), map_location="cpu", weights_only=False)
         spec = ck["spec"]
         model = build_model(spec, ck["input_size"])

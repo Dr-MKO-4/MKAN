@@ -68,7 +68,7 @@ def _write_json(path: str, obj) -> None:
 
 
 def make_spec(phase: str, cell_type: str, regime: str, base_by_gate: dict, seed: int,
-              protocol: dict, data_dir: str, input_size: int) -> dict:
+              protocol: dict, data_dir: str, input_size: int, extras: dict = None) -> dict:
     from gru_cell import match_gru_hidden_size
     theta = config.CELL_THETA[cell_type]
     hidden = (config.HIDDEN_TKAN if cell_type == "lstm"
@@ -82,6 +82,7 @@ def make_spec(phase: str, cell_type: str, regime: str, base_by_gate: dict, seed:
             "max_epochs": protocol["max_epochs"], "patience": protocol["patience"],
             "min_delta": protocol["min_delta"], "data_dir": data_dir,
             "n_windows_train": protocol["n_windows_train"]}
+    spec.update(extras or {})       # absent pour le plan de base : identifiants des runs inchanges
     key = {k: v for k, v in spec.items() if k != "data_dir"}
     spec["run_id"] = hashlib.sha1(json.dumps(key, sort_keys=True).encode()).hexdigest()[:16]
     spec["label"] = f"{'TKAN' if cell_type == 'lstm' else 'GRU'} {regime} {arch} s{seed}"
@@ -128,7 +129,8 @@ class Pool:
         env = dict(os.environ, OMP_NUM_THREADS=str(self.threads),
                    MKL_NUM_THREADS=str(self.threads), MKAN_EVAL_THREADS=str(self.eval_threads))
         log = open(os.path.join(rd, "log.txt"), "a", encoding="utf-8")
-        proc = subprocess.Popen([sys.executable, os.path.join(_CAMPAGNE_DIR, "train_run.py"),
+        proc = subprocess.Popen([sys.executable, os.path.join(_CAMPAGNE_DIR,
+                                                              spec.get("script", "train_run.py")),
                                  "--spec", spec_path, "--threads", str(self.threads)],
                                 stdout=log, stderr=subprocess.STDOUT, env=env)
         self.running[spec["run_id"]] = (proc, spec, time.time())
@@ -194,23 +196,28 @@ def latency_pass(out_dir: str):
     return write_reports(out_dir)
 
 
-def _dataset(regime: str, W: int, n_train):
+def _dataset(regime: str, W: int, n_train, preproc: str = "B", drop=()):
     from prepare_data import dataset_dir, dataset_ready, prepare
-    path = dataset_dir(regime, W, n_train)
+    path = dataset_dir(regime, W, n_train, preproc, drop)
     if not dataset_ready(path):
-        prepare([regime], [W], n_train)
+        prepare([regime], [W], n_train, preproc=preproc, drop=drop)
     with open(os.path.join(path, "meta.json"), encoding="utf-8") as f:
         return path, json.load(f)["input_size"]
 
 
-def specs_for(phase, archs, regime, seeds, protocol):
+def specs_for(phase, archs, regime, seeds, protocol, preproc="B", drop=(), extras_par_arch=None):
     out = []
     for a in archs:
         W = config.CELL_THETA[a["cell_type"]]["W"]
-        path, input_size = _dataset(regime, W, protocol["n_windows_train"] or None)
+        path, input_size = _dataset(regime, W, protocol["n_windows_train"] or None, preproc, drop)
+        extras = dict(extras_par_arch(a, input_size)) if extras_par_arch else {}
+        if preproc != "B":
+            extras["preproc"] = preproc
+        if drop:
+            extras["drop_cols"] = sorted(drop)
         for seed in seeds:
             out.append(make_spec(phase, a["cell_type"], regime, a["base_by_gate"], seed,
-                                 protocol, path, input_size))
+                                 protocol, path, input_size, extras))
     return out
 
 
@@ -251,10 +258,107 @@ def run_final(pool: Pool, finalists_path: str):
     print("[final] termine", flush=True)
 
 
+SOLDES = {"emetteur": ("oldBalanceOrig", "newBalanceOrig"),
+          "tous": ("oldBalanceOrig", "newBalanceOrig", "oldBalanceDest", "newBalanceDest")}
+
+
+def _finalistes_par_regime(path: str) -> dict:
+    with open(path, encoding="utf-8") as f:
+        finalists = json.load(f)
+    par = {}
+    for fin in finalists:
+        par.setdefault(fin["regime"], []).append(fin)
+    return par
+
+
+def _paires_multkan(pool: Pool, arch: dict, regime: str, input_size: int) -> list:
+    """Paires de variables classees par H decroissant (interactions.py), calculees une fois sur le
+    finaliste de graine 1 entraine sans MultKAN."""
+    p = config.FINAL
+    W = config.CELL_THETA[arch["cell_type"]]["W"]
+    path, _ = _dataset(regime, W, p["n_windows_train"] or None)
+    ref = make_spec("final", arch["cell_type"], regime, arch["base_by_gate"], p["seeds"][0], p,
+                    path, input_size)
+    sortie = os.path.join(pool.out_dir, "multkan", ref["run_id"] + ".json")
+    if not os.path.exists(sortie):
+        subprocess.run([sys.executable, os.path.join(_CAMPAGNE_DIR, "interactions.py"),
+                        "--run_dir", pool.run_dir(ref), "--data_dir", path, "--out", sortie],
+                       check=True)
+    with open(sortie, encoding="utf-8") as f:
+        return json.load(f)["paires"]
+
+
+def run_experience(pool: Pool, nom: str, finalists_path: str, variante: str = None):
+    """Experiences sur les finalistes, memes donnees et hyperparametres que le final, 5 graines.
+    Chaque experience est lancee a part : le budget decide lesquelles tournent."""
+    p = config.FINAL
+    seeds = p["seeds"]
+    par_regime = _finalistes_par_regime(finalists_path)
+
+    def phase(nom_phase, **kw):
+        specs = []
+        for regime, archs in par_regime.items():
+            specs += specs_for(nom_phase, archs, regime, seeds, p, **kw)
+        pool.run_phase(nom_phase, specs)
+
+    if nom == "preproc":
+        for pre in ("A", "C"):                  # B : l'entrainement final, deja disponible
+            phase(f"exp_preproc_{pre}", preproc=pre)
+    elif nom == "multkan":
+        for regime, archs in par_regime.items():
+            for K in (1, 2, 3):                 # K = 0 : l'entrainement final
+                def extras(arch, input_size, K=K, regime=regime):
+                    h = make_spec("final", arch["cell_type"], regime, arch["base_by_gate"], seeds[0],
+                                  p, "", input_size)["hidden_size"]
+                    paires = _paires_multkan(pool, arch, regime, input_size)[:K]
+                    return {"mult_pairs": {"candidate": {str(h - 1 - n): [h + q["i"], h + q["j"]]
+                                                         for n, q in enumerate(paires)}},
+                            "multkan_K": K}
+                pool.run_phase(f"exp_multkan_K{K}", specs_for(f"exp_multkan_K{K}", archs, regime, seeds,
+                                                              p, extras_par_arch=extras))
+    elif nom == "raccourci":
+        # Un finaliste suffit (decision du 03/11) : le premier de la liste, sauf "raccourci": true.
+        tous = [a for archs in par_regime.values() for a in archs]
+        cible = next((a for a in tous if a.get("raccourci")), tous[0])
+        drop = SOLDES[variante or "emetteur"]
+        pool.run_phase(f"exp_raccourci_{variante or 'emetteur'}",
+                       specs_for(f"exp_raccourci_{variante or 'emetteur'}", [cible], cible["regime"],
+                                 seeds, p, drop=drop))
+    elif nom == "baselines":
+        specs = []
+        for regime in par_regime:
+            for W in sorted({config.CELL_THETA[a["cell_type"]]["W"] for a in par_regime[regime]}):
+                path, input_size = _dataset(regime, W, p["n_windows_train"] or None)
+                for modele in ("xgboost", "mlp", "lstm"):
+                    for seed in seeds:
+                        specs.append(_spec_baseline(modele, regime, W, seed, p, path, input_size))
+        pool.run_phase("exp_baselines", specs)
+    latency_pass(pool.out_dir)
+    print(f"[{nom}] termine", flush=True)
+
+
+def _spec_baseline(modele: str, regime: str, W: int, seed: int, protocol: dict, data_dir: str,
+                   input_size: int) -> dict:
+    theta = config.CELL_THETA["lstm"]
+    spec = {"phase": "exp_baselines", "cell_type": "baseline", "baseline": modele,
+            "script": "train_baseline.py", "regime": regime, "base_by_gate": {"modele": modele},
+            "seed": seed, "hidden_size": config.HIDDEN_TKAN, "W": W, "lr": theta["lr"],
+            "batch_size": theta["batch_size"], "clip_grad_norm": config.CLIP_GRAD_NORM,
+            "max_epochs": protocol["max_epochs"], "patience": protocol["patience"],
+            "min_delta": protocol["min_delta"], "data_dir": data_dir,
+            "n_windows_train": protocol["n_windows_train"]}
+    key = {k: v for k, v in spec.items() if k != "data_dir"}
+    spec["run_id"] = hashlib.sha1(json.dumps(key, sort_keys=True).encode()).hexdigest()[:16]
+    spec["label"] = f"baseline {modele} {regime} W={W} s{seed}"
+    return spec
+
+
 def main():
     ap = argparse.ArgumentParser(description="Orchestration de la campagne AWS")
-    ap.add_argument("--mode", choices=["etape4", "final"], default="etape4")
-    ap.add_argument("--finalists", help="JSON des finalistes (mode final)")
+    ap.add_argument("--mode", choices=["etape4", "final", "preproc", "multkan", "raccourci", "baselines"],
+                    default="etape4")
+    ap.add_argument("--finalists", help="JSON des finalistes (mode final et experiences)")
+    ap.add_argument("--variante", choices=sorted(SOLDES), help="raccourci : soldes retires")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     ap.add_argument("--threads", type=lambda v: v if v == "auto" else int(v), default=2,
                     help="threads par run, ou auto (calcules pour chaque phase)")
@@ -266,8 +370,11 @@ def main():
         run_etape4(pool)
     else:
         if not args.finalists:
-            ap.error("--finalists est requis en mode final")
-        run_final(pool, args.finalists)
+            ap.error(f"--finalists est requis en mode {args.mode}")
+        if args.mode == "final":
+            run_final(pool, args.finalists)
+        else:
+            run_experience(pool, args.mode, args.finalists, args.variante)
 
 
 if __name__ == "__main__":

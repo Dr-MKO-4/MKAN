@@ -84,9 +84,30 @@ def read_momtsim_parquet(path: str) -> pd.DataFrame:
     return df
 
 
-def build_regime_frame(df: pd.DataFrame, regime: str) -> "tuple[pd.DataFrame, list]":
+def d_ks_normale(x: np.ndarray, seed: int, n: int = 5000) -> float:
+    """D_KS = sup |F_emp - Phi| entre x standardisée et la loi normale, sur n valeurs tirées."""
+    from scipy.special import ndtr
+    x = np.asarray(x, dtype=np.float64)
+    std = x.std() or 1.0
+    z = (x - x.mean()) / std
+    if len(z) > n:
+        z = np.random.default_rng(seed).choice(z, n, replace=False)
+    z = np.sort(z)
+    m = len(z)
+    cdf = ndtr(z)
+    return float(max((np.arange(1, m + 1) / m - cdf).max(), (cdf - np.arange(m) / m).max()))
+
+
+def build_regime_frame(df: pd.DataFrame, regime: str, preproc: str = "B",
+                       etat_preproc: Optional[dict] = None) -> "tuple[pd.DataFrame, list]":
     """
     Construit les colonnes de features du régime demandé.
+
+    preproc : "B" (défaut, comportement historique) sign(x)*log1p(|x|) sur les colonnes non binaires ;
+              "C" aucune transformation avant le z-score ;
+              "A" conditionnel (mémoire §4.1) : si D_KS >= 0,15 sur le train, log(1 + max(x - m_j, 0)),
+              m_j = min du train. etat_preproc : dict rempli au premier appel (train) avec
+              {"m_j": {colonne: m_j}, "d_ks": {colonne: D_KS}}, réutilisé tel quel ensuite (val, flux).
 
     regime : "traite" (features issues du feature engineering, eq. 3.8-3.19)
              "brut"   (colonnes transactionnelles + encodage one-hot de `action`)
@@ -127,11 +148,30 @@ def build_regime_frame(df: pd.DataFrame, regime: str) -> "tuple[pd.DataFrame, li
         raise ValueError(f"regime inconnu : {regime}")
 
     df[cols] = df[cols].fillna(0.0)
-    for c in cols:
+    if preproc not in ("A", "B", "C"):
+        raise ValueError(f"pretraitement inconnu : {preproc}")
+    if preproc == "C":
+        return df, cols
+    if preproc == "A":
+        if etat_preproc is None:
+            raise ValueError("preproc A : etat_preproc requis (rempli sur le train, relu ensuite)")
+        premier_appel = "m_j" not in etat_preproc
+        if premier_appel:
+            etat_preproc.update(m_j={}, d_ks={})
+    for j, c in enumerate(cols):
         if c in BINARY_COLS or c in ACTION_ONEHOT_COLS:
             continue
         x = df[c].to_numpy(dtype=np.float64)
-        df[c] = np.sign(x) * np.log1p(np.abs(x))
+        if preproc == "B":
+            df[c] = np.sign(x) * np.log1p(np.abs(x))
+            continue
+        if premier_appel:
+            d = d_ks_normale(x, 42 + j)
+            etat_preproc["d_ks"][c] = d
+            if d >= 0.15:
+                etat_preproc["m_j"][c] = float(x.min())
+        if c in etat_preproc["m_j"]:
+            df[c] = np.log1p(np.maximum(x - etat_preproc["m_j"][c], 0.0))
     return df, cols
 
 

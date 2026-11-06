@@ -33,13 +33,19 @@ from datetime import datetime, timezone
 import numpy as np
 
 import config
-from niveau1_harness import (read_momtsim_parquet, build_regime_frame, standardize,
+from niveau1_harness import (read_momtsim_parquet, build_regime_frame, d_ks_normale, standardize,
                              prepare_window_arrays, sample_windows_from_arrays,
                              BINARY_COLS, ACTION_ONEHOT_COLS)
 
 
-def dataset_dir(regime: str, W: int, n_train) -> str:
-    return os.path.join(config.DATA_DIR, f"{regime}_W{W}_n{n_train or 'all'}")
+def dataset_dir(regime: str, W: int, n_train, preproc: str = "B", drop=()) -> str:
+    """Le nom historique est garde pour le pretraitement B sans colonne retiree."""
+    nom = f"{regime}_W{W}_n{n_train or 'all'}"
+    if preproc != "B":
+        nom += f"_p{preproc}"
+    if drop:
+        nom += "_sans_" + "_".join(sorted(drop))
+    return os.path.join(config.DATA_DIR, nom)
 
 
 def dataset_ready(path: str) -> bool:
@@ -70,9 +76,19 @@ def _write_json(path: str, obj: dict) -> None:
     os.replace(tmp, path)
 
 
-def prepare(regimes, Ws, n_train, n_monitor=50_000, n_audit=256, force=False) -> list:
+ETAPES_PREPROC = {
+    "A": "log(1 + max(x - m_j, 0)) sur les colonnes continues de D_KS >= 0,15 (train)",
+    "B": "sign(x)*log1p(|x|) sur les colonnes non binaires",
+    "C": "aucune transformation avant la standardisation",
+}
+
+
+def prepare(regimes, Ws, n_train, n_monitor=50_000, n_audit=256, force=False,
+            preproc: str = "B", drop=()) -> list:
+    """preproc, drop : memes fenetres et memes tirages que le jeu de reference (les graines et le
+    fenetrage ne dependent ni des valeurs ni des colonnes), seules les colonnes changent."""
     todo = [(r, W) for r in regimes for W in Ws
-            if force or not dataset_ready(dataset_dir(r, W, n_train))]
+            if force or not dataset_ready(dataset_dir(r, W, n_train, preproc, drop))]
     if not todo:
         print("Tous les jeux demandes existent deja.")
         return []
@@ -83,8 +99,12 @@ def prepare(regimes, Ws, n_train, n_monitor=50_000, n_audit=256, force=False) ->
     done = []
     for regime in sorted({r for r, _ in todo}):
         t0 = time.time()
-        df_train, cols = build_regime_frame(df_train_raw, regime)
-        df_val, _ = build_regime_frame(df_val_raw, regime)
+        etat = {}
+        df_train, cols = build_regime_frame(df_train_raw, regime, preproc, etat)
+        df_val, _ = build_regime_frame(df_val_raw, regime, preproc, etat)
+        cols = [c for c in cols if c not in set(drop)]
+        d_ks = {c: d_ks_normale(df_train[c].to_numpy(), 42 + j) for j, c in enumerate(cols)
+                if c not in BINARY_COLS and c not in ACTION_ONEHOT_COLS}
         stats = standardize(df_train, cols)
         standardize(df_val, cols, stats=stats)
         arr_train = prepare_window_arrays(df_train, cols)
@@ -93,7 +113,7 @@ def prepare(regimes, Ws, n_train, n_monitor=50_000, n_audit=256, force=False) ->
         preprocessing = {
             "regime": regime, "feature_cols": cols,
             "steps": ["fillna(0)",
-                      "sign(x)*log1p(|x|) sur les colonnes non binaires",
+                      ETAPES_PREPROC[preproc],
                       "standardisation (moyenne, ecart-type du train)",
                       "ecretage a [-4, 4]"],
             "log_excluded_cols": [c for c in cols if c in BINARY_COLS or c in ACTION_ONEHOT_COLS],
@@ -101,11 +121,14 @@ def prepare(regimes, Ws, n_train, n_monitor=50_000, n_audit=256, force=False) ->
             "clip": [-4.0, 4.0],
             "action_categories_onehot": [c for c in cols if c in ACTION_ONEHOT_COLS],
             "source_code": "niveau1_harness.build_regime_frame + standardize",
+            "preproc": preproc, "colonnes_retirees": sorted(drop),
+            "d_ks_apres_transformation": d_ks,
+            "d_ks_avant_transformation": etat.get("d_ks", {}), "m_j": etat.get("m_j", {}),
         }
         for r, W in todo:
             if r != regime:
                 continue
-            out = dataset_dir(regime, W, n_train)
+            out = dataset_dir(regime, W, n_train, preproc, drop)
             os.makedirs(out, exist_ok=True)
             X_tr, y_tr, n_tr_full = sample_windows_from_arrays(arr_train, W, None, n_train, 42)
             X_va, y_va, n_va_full = sample_windows_from_arrays(arr_val, W, None, None, 43)

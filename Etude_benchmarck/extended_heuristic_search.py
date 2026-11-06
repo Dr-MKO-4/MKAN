@@ -770,8 +770,12 @@ def _crowding_distance(front_objectives: list) -> list:
 
 def _compute_r2_symbolic(model: torch.nn.Module, x_pool: torch.Tensor,
                          theta: float = 0.01, r2_threshold: float = 0.99,
-                         max_edges: int = 40, domain: float = 2.0) -> float:
+                         max_edges: int = 40, domain: float = 2.0,
+                         survivors: Optional[list] = None) -> float:
     """
+    survivors : aretes (couche, i, j, score) deja choisies par l'appelant (score d'attribution) ;
+    None : choix historique, L1 > theta classees par L1.
+
     R2_symbolic (section 3, R² symbolique) : élagage (arête survivante si
     L1 > theta) puis régression symbolique par gradient  mêmes familles de
     fonctions, même objectif c*f(a*x+b)+d, mêmes hyperparamètres (150 pas
@@ -809,14 +813,15 @@ def _compute_r2_symbolic(model: torch.nn.Module, x_pool: torch.Tensor,
         if m is not None:
             gate_modules.append(m)
 
-    survivors = []   # (layer, i, j, l1_importance)
-    with torch.no_grad():
-        for layer in gate_modules:
-            edges = layer.edge_activations(x_pool)          # (batch, in, out)
-            l1_mat = edges.abs().mean(dim=0)
-            mask = l1_mat > theta
-            for i, j in mask.nonzero(as_tuple=False).tolist():
-                survivors.append((layer, i, j, float(l1_mat[i, j])))
+    if survivors is None:
+        survivors = []   # (layer, i, j, l1_importance)
+        with torch.no_grad():
+            for layer in gate_modules:
+                edges = layer.edge_activations(x_pool)          # (batch, in, out)
+                l1_mat = edges.abs().mean(dim=0)
+                mask = l1_mat > theta
+                for i, j in mask.nonzero(as_tuple=False).tolist():
+                    survivors.append((layer, i, j, float(l1_mat[i, j])))
 
     if not survivors:
         return 0.0
@@ -995,6 +1000,7 @@ def compute_fitness(
 
         optimizer = DMLAdam(model.parameters(), lr=float(config["lr"]))
         batch_size = int(config["batch_size"])
+        perm_gen = torch.Generator().manual_seed(int(seed))
 
         X_tr_t = torch.from_numpy(X_tr).to(device)
         y_tr_t = torch.from_numpy(y_tr).to(device)
@@ -1010,8 +1016,10 @@ def compute_fitness(
         # persistante (cf. _evaluer_generation).
         epoch_pbar = tqdm(range(n_epochs_eval), desc="      entraînement", unit="ép", leave=False)
         for _ in epoch_pbar:
-            with rl:   # meme generateur global que torch.manual_seed ci-dessus
-                perm = torch.randperm(n, device=device)
+            # Generateur propre a l'individu : le generateur global, partage entre les fils,
+            # rendait le melange dependant de l'ordre des autres evaluations (meme configuration,
+            # fitness 0,223 puis 0,507). L'initialisation des poids reste sous rl, plus haut.
+            perm = torch.randperm(n, generator=perm_gen).to(device)
             # Accumulation en TENSEUR (pas de .item() par batch) : un .item()
             # par batch forcerait une synchronisation GPU à chaque pas (casse
             # le pipeline asynchrone MPS/CUDA  exactement le genre de coût
@@ -1850,10 +1858,22 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                       f"données/schéma/device : voir les lignes [ERREUR] ci-dessus pour la "
                       f"cause exacte (souvent la même pour tous).")
 
+    def _chemin_evaluation(self, individual: dict) -> str:
+        """Fichier de l'evaluation d'un individu : meme configuration et meme protocole, meme fichier."""
+        import hashlib
+        cle = json.dumps({"ind": individual, "seed": self.seed, "fen": self.n_windows_eval,
+                          "ep": self.n_epochs_eval}, sort_keys=True, default=str)
+        d = os.path.join(self.scratch_dir, "evaluations")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, hashlib.sha1(cle.encode()).hexdigest()[:16] + ".pt")
+
     def _evaluer_un(self, gen: int, individual_id: int, individual: dict,
                     df_train, df_val, device,
                     latency_ms_override: Optional[float] = None) -> dict:
-        if not validate_individual(individual):
+        chemin_eval = self._chemin_evaluation(individual) if validate_individual(individual) else None
+        if chemin_eval and os.path.exists(chemin_eval):
+            result = torch.load(chemin_eval, map_location="cpu", weights_only=False)
+        elif not validate_individual(individual):
             result = {"fitness_total": self.invalid_fitness, "fitness_components": None,
                       "model_state": None, "error": "individu invalide (validate_individual)"}
         else:
@@ -1880,6 +1900,11 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                 from tqdm.auto import tqdm as _tqdm
                 _tqdm.write(f"  [ERREUR] gén={gen} ind={individual_id} : {_err.splitlines()[0] if _err else '?'}")
                 result = {**result, "fitness_total": self.invalid_fitness}
+
+        if chemin_eval and result.get("fitness_components") is not None and not os.path.exists(chemin_eval):
+            tmp = f"{chemin_eval}.{threading.get_ident()}.tmp"     # atomique : une reprise relit ce fichier
+            torch.save(result, tmp)
+            os.replace(tmp, chemin_eval)
 
         with self._log_lock:
             self._n_evaluations += 1

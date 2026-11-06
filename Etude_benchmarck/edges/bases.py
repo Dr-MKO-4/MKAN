@@ -69,6 +69,21 @@ def _bmm_edges(basis_vals: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
 # anciens state_dict (buffers 1-D) se rechargent par diffusion (_LegacyGridLoad).
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _figer_nouvelles(base: nn.Module, noms: tuple, col: int, n_old: int) -> None:
+    """Grid Extension : seules les nouvelles fonctions de la colonne col s'entrainent ; celles ajoutees
+    aux autres colonnes, de poids nul, restent nulles (leur gradient est masque)."""
+    masques = base.__dict__.setdefault("_masques_extension", {})
+    for nom in noms:
+        p = getattr(base, nom)
+        masque = torch.ones_like(p)
+        if nom in masques:                  # extensions precedentes : leurs fonctions figees le restent
+            masque[:, :, :n_old] = masques[nom]
+        masque[:, :, n_old:] = 0.0
+        masque[col, :, n_old:] = 1.0
+        masques[nom] = masque
+        p.register_hook(lambda g, m=masque: g * m)
+
+
 class _LegacyGridLoad:
     """Recharge un state_dict d'avant le correctif : un buffer partage par toutes
     les entrees (forme (M,) ou scalaire) est diffuse a la forme par entree."""
@@ -139,6 +154,20 @@ class HybridBasis(_LegacyGridLoad, nn.Module):
         fourier_out = (_bmm_edges(torch.cos(kx), self.a_fourier)
                        + _bmm_edges(torch.sin(kx), self.b_fourier))
         return gauss_out + fourier_out
+
+    @torch.no_grad()
+    @torch.no_grad()
+    def extend(self, col: int, x_l: float, x_r: float, delta: int, samples=None) -> None:
+        """Ajoute delta gaussiennes dans [x_l, x_r] pour col, poids nul (fonction conservee) ; autres
+        colonnes : centres au bord du domaine, fonctions figees a zero (tenseur rectangulaire)."""
+        ajout = self.centers[:, -1:].repeat(1, delta)
+        ajout[col] = torch.linspace(x_l, x_r, delta, dtype=ajout.dtype)
+        n_old = self.w_gauss.shape[-1]
+        self.centers = torch.cat([self.centers, ajout], dim=1)
+        self.M += delta
+        zeros = torch.zeros(*self.w_gauss.shape[:2], delta, dtype=self.w_gauss.dtype)
+        self.w_gauss = nn.Parameter(torch.cat([self.w_gauss, zeros], dim=-1))
+        _figer_nouvelles(self, ("w_gauss",), col, n_old)
 
     @torch.no_grad()
     def fit_grid(self, samples: torch.Tensor, start_col: int) -> None:
@@ -311,6 +340,36 @@ class BSplineBasis(nn.Module):
     def l1_norm(self) -> torch.Tensor:
         return self.weight.abs().sum()
 
+    @torch.no_grad()
+    def extend(self, col: int, x_l: float, x_r: float, delta: int, samples: torch.Tensor) -> None:
+        """Grid Extension (Liu et al. 2024, section 2.4). Colonne col : delta noeuds uniformes dans
+        [x_l, x_r] ; autres colonnes : delta noeuds aux milieux des plus grands intervalles, pour garder
+        un tenseur rectangulaire. Coefficients par moindres carres sur samples (n, in_features)."""
+        ancienne, k = self.grid.clone(), self.k
+        base_old = self._b_splines(torch.clamp(samples, ancienne[:, k], ancienne[:, -k - 1]))
+        interieurs = []
+        for c in range(ancienne.shape[0]):
+            noeuds = ancienne[c, k:-k].clone()
+            if c == col:
+                nouveaux = torch.linspace(x_l, x_r, delta + 2, dtype=noeuds.dtype)[1:-1]
+                noeuds = torch.sort(torch.cat([noeuds, nouveaux])).values
+            else:
+                for _ in range(delta):
+                    i = int((noeuds[1:] - noeuds[:-1]).argmax())
+                    noeuds = torch.cat([noeuds[:i + 1], (noeuds[i] + noeuds[i + 1])[None] / 2, noeuds[i + 1:]])
+            interieurs.append(noeuds)
+        interieurs = torch.stack(interieurs)                                  # (in, G + delta + 1)
+        self.G += delta
+        pas = ((interieurs[:, -1] - interieurs[:, 0]) / self.G)[:, None]
+        ext = torch.arange(1, k + 1, dtype=interieurs.dtype)[None, :] * pas
+        self.grid = torch.cat([interieurs[:, :1] - ext.flip(1), interieurs, interieurs[:, -1:] + ext], dim=1)
+        base_new = self._b_splines(torch.clamp(samples, self.grid[:, k], self.grid[:, -k - 1]))
+        poids = torch.empty(ancienne.shape[0], self.weight.shape[1], self.G + k, dtype=self.weight.dtype)
+        for c in range(ancienne.shape[0]):
+            phi_old = base_old[:, c] @ self.weight[c].T                       # (n, out), colonne par colonne
+            poids[c] = torch.linalg.lstsq(base_new[:, c], phi_old).solution.T
+        self.weight = nn.Parameter(poids)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Chebyshev-KAN (Sidharth et al., 2024)
@@ -395,6 +454,20 @@ class WaveletBasis(nn.Module):
     def l1_norm(self) -> torch.Tensor:
         return self.weight.abs().sum()
 
+    @torch.no_grad()
+    def extend(self, col: int, x_l: float, x_r: float, delta: int, samples=None) -> None:
+        """Ajoute delta ondelettes par arete, centres uniformes dans [x_l, x_r], echelle (x_r - x_l) / delta,
+        poids nul : la fonction apprise est conservee exactement a l'insertion."""
+        tau = torch.zeros(*self.tau.shape[:2], delta, dtype=self.tau.dtype)
+        tau[col] = torch.linspace(x_l, x_r, delta, dtype=self.tau.dtype)
+        echelle = torch.ones_like(tau)
+        echelle[col] = max((x_r - x_l) / delta, 1e-3)
+        n_old = self.tau.shape[-1]
+        self.tau = nn.Parameter(torch.cat([self.tau, tau], dim=-1))
+        self.scale = nn.Parameter(torch.cat([self.scale, echelle], dim=-1))
+        self.weight = nn.Parameter(torch.cat([self.weight, torch.zeros_like(tau)], dim=-1))
+        _figer_nouvelles(self, ("tau", "scale", "weight"), col, n_old)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ReLU-KAN (Qiu et al., 2024)
@@ -433,6 +506,20 @@ class ReLUKANBasis(nn.Module):
 
     def l1_norm(self) -> torch.Tensor:
         return self.weight.abs().sum()
+
+    @torch.no_grad()
+    def extend(self, col: int, x_l: float, x_r: float, delta: int, samples=None) -> None:
+        """Ajoute delta bases par arete, centres uniformes dans [x_l, x_r], demi-largeur (x_r - x_l) / delta,
+        poids nul : la fonction apprise est conservee exactement a l'insertion."""
+        centre = torch.zeros(*self.center.shape[:2], delta, dtype=self.center.dtype)
+        centre[col] = torch.linspace(x_l, x_r, delta, dtype=self.center.dtype)
+        largeur = max((x_r - x_l) / delta, 1e-3)
+        brute = torch.full_like(centre, math.log(math.exp(largeur) - 1.0))
+        n_old = self.center.shape[-1]
+        self.center = nn.Parameter(torch.cat([self.center, centre], dim=-1))
+        self.width_raw = nn.Parameter(torch.cat([self.width_raw, brute], dim=-1))
+        self.weight = nn.Parameter(torch.cat([self.weight, torch.zeros_like(centre)], dim=-1))
+        _figer_nouvelles(self, ("center", "width_raw", "weight"), col, n_old)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

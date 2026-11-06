@@ -71,8 +71,10 @@ def build_model(spec: dict, input_size: int) -> torch.nn.Module:
     from gru_cell import GRUMKANScorer
     gate_bases, gate_kwargs = _build_gate_bases(spec["cell_type"], spec["base_by_gate"])
     cls = ConfigurableMKANScorer if spec["cell_type"] == "lstm" else GRUMKANScorer
+    mult = spec.get("mult_pairs")      # {porte: {j: [i1, i2]}}, cles en texte dans le JSON
+    mult = {g: {int(j): tuple(p) for j, p in d.items()} for g, d in mult.items()} if mult else None
     return cls(input_size, spec["hidden_size"], gate_bases=gate_bases,
-               gate_kwargs=gate_kwargs or None)
+               gate_kwargs=gate_kwargs or None, mult_pairs=mult)
 
 
 def load_dataset(path: str) -> dict:
