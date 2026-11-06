@@ -3,6 +3,8 @@
 #     bash launch.sh bench                     # banc d'essai seul (sentinelle + suivi actifs)
 #     bash launch.sh etape4 32 2               # nouvelle Etape 4 : 32 processus x 2 threads
 #     bash launch.sh final 20 3 finalistes.json
+#     bash launch.sh preproc 64 auto finalistes.json       # experiences : preproc, multkan, baselines
+#     bash launch.sh raccourci 64 auto finalistes.json emetteur   # ou : tous
 #     bash launch.sh stop                      # arret propre : sauvegarde de tous les runs
 # Suivre : tmux attach -t mkan-sched   (Ctrl+b puis d pour detacher)
 set -euo pipefail
@@ -18,7 +20,7 @@ start_bg() {   # nom, commande
 }
 
 case "$MODE" in
-  bench|etape4|final)
+  bench|etape4|final|preproc|multkan|raccourci|baselines)
     rm -f "$OUT/STOP"
     start_bg mkan-sentinel "python sentinel.py"
     start_bg mkan-monitor "python monitor/app.py"
@@ -34,11 +36,13 @@ case "$MODE" in
   final)
     tmux new-session -d -s mkan-sched \
       "python scheduler.py --mode final --workers ${2:-20} --threads ${3:-3} --finalists ${4:?fichier des finalistes} 2>&1 | tee -a $OUT/scheduler.log" ;;
+  preproc|multkan|raccourci|baselines)
+    tmux new-session -d -s mkan-sched       "python scheduler.py --mode $MODE --workers ${2:-64} --threads ${3:-auto} --finalists ${4:?fichier des finalistes} ${5:+--variante $5} 2>&1 | tee -a $OUT/scheduler.log" ;;
   stop)
     echo "arret demande par l'utilisateur" > "$OUT/STOP"
     echo "STOP cree : chaque run sauvegarde et quitte ; la sentinelle copie vers S3." ;;
   *)
-    echo "usage : bash launch.sh {bench|etape4 [workers threads]|final workers threads finalistes.json|stop}"
+    echo "usage : bash launch.sh {bench|etape4 [workers threads]|final workers threads finalistes.json|preproc|multkan|raccourci|baselines workers threads finalistes.json [variante]|stop}"
     exit 1 ;;
 esac
 tmux ls
