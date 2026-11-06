@@ -13,6 +13,7 @@ Fitness (formule de l'Etape 4, poids AHP inchanges) avec la penalite de latence
 plafonnee et le seuil de 500 ms decides le 03/11 :
     F = 0,4147 max(0, MCC) + 0,2573 PR-AUC - 0,1529 Brier + 0,0876 R2_symb
         - 0,0876 min(1, max(0, L - T) / T),   T = 500 ms
+R2_symb : seuil de travail principal 0,80 (decision du 27/10, config.R2_ALT).
 """
 
 import argparse
@@ -31,7 +32,7 @@ import config  # noqa: E402
 import torch  # noqa: E402
 
 
-def fitness(metrics: dict, latency_ms, r2_key: str = "r2_symbolic") -> dict:
+def fitness(metrics: dict, latency_ms, r2_key: str = f"r2_symbolic_{config.R2_ALT:.2f}") -> dict:
     """Fitness de l'Etape 4 ; latency_ms=None donne la fitness SANS terme de
     latence (affichee comme provisoire tant que la mesure n'est pas faite)."""
     from extended_heuristic_search import (

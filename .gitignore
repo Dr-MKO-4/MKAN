@@ -33,3 +33,6 @@ instruction_et_code.txt
 
 # Fichiers parasites macOS
 ._*
+
+# Copies locales des resultats de la campagne AWS
+Etude_benchmarck/campagne_aws/resultats_instance/

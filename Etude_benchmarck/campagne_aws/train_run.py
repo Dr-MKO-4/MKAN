@@ -282,7 +282,12 @@ def train(spec: dict, run_dir: str, threads: int) -> int:
             return EXIT_INTERRUPTED
 
     # ── Evaluation des poids de la meilleure epoque sur toute la validation ──
-    status(state="evaluation", force=True)
+    # L'evaluation n'est pas sauvegardee : en fin de phase, plus de threads pour qu'elle finisse
+    # entre deux interruptions spot. Les poids sont deja figes.
+    eval_threads = int(os.environ.get("MKAN_EVAL_THREADS") or threads)
+    torch.set_num_threads(eval_threads)
+    t_eval = time.time()
+    status(state="evaluation", eval_threads=eval_threads, force=True)
     from niveau1_harness import compute_metrics
     from niveau1_benchmark_run import _build_x_pool
     from extended_heuristic_search import _compute_r2_symbolic
@@ -310,7 +315,8 @@ def train(spec: dict, run_dir: str, threads: int) -> int:
                     "stopped_early": st["wait"] >= spec["patience"],
                     "train_loss_history": st["train_loss"],
                     "monitor_loss_history": st["monitor_loss"],
-                    "train_time_s": time_before + (time.time() - t_session)})
+                    "train_time_s": time_before + (time.time() - t_session),
+                    "eval_threads": eval_threads, "eval_time_s": time.time() - t_eval})
 
     np.save(os.path.join(run_dir, "val_scores.npy"), scores.astype(np.float32))
     np.savez_compressed(os.path.join(run_dir, "edge_profiles.npz"),

@@ -22,6 +22,11 @@ chaque run, et empeche d'en lancer de nouveaux.
 Usage :
     python scheduler.py --workers 32 --threads 2
     python scheduler.py --mode final --finalists finalistes.json --workers 20 --threads 3
+    python scheduler.py --workers 64 --threads auto   # threads par run calcules pour chaque phase
+
+--threads auto : coeurs disponibles // nombre total de runs de la phase, entre 1 et
+MAX_THREADS_PAR_RUN. Calcule sur la phase entiere (pas sur les runs restants) : un run garde
+le meme nombre de threads a chaque reprise.
 """
 
 import argparse
@@ -41,6 +46,14 @@ import config  # noqa: E402
 GATE_SHORT = {"Forget": "F", "Input": "I", "Candidate": "C", "Output": "O"}
 BASE_SHORT = {"wavkan_dog": "dog", "wavkan_morlet": "morlet", "efficientkan": "bspl",
               "relukan": "relu", "linear": "lin", "hybrid": "hyb"}
+
+
+MAX_THREADS_PAR_RUN = 4      # le banc d'essai (bench_c8g.log) ne mesure le debit que jusqu'a 4 threads
+COEURS_RESERVES = 2          # sentinelle et suivi
+
+
+def threads_par_run(n_runs: int, coeurs: int) -> int:
+    return max(1, min(MAX_THREADS_PAR_RUN, (coeurs - COEURS_RESERVES) // max(1, n_runs)))
 
 
 def _now() -> str:
@@ -85,6 +98,7 @@ def _cost_estimate(spec: dict) -> float:
 class Pool:
     def __init__(self, workers: int, threads: int, out_dir: str, mode: str):
         self.workers, self.threads, self.out_dir, self.mode = workers, threads, out_dir, mode
+        self.auto = threads == "auto"
         self.running = {}        # run_id -> (Popen, spec, t0)
         self.failed, self.done = {}, set()
         self.phase, self.total = "", 0
@@ -112,7 +126,7 @@ class Pool:
         if not os.path.exists(spec_path):
             _write_json(spec_path, spec)
         env = dict(os.environ, OMP_NUM_THREADS=str(self.threads),
-                   MKL_NUM_THREADS=str(self.threads))
+                   MKL_NUM_THREADS=str(self.threads), MKAN_EVAL_THREADS=str(self.eval_threads))
         log = open(os.path.join(rd, "log.txt"), "a", encoding="utf-8")
         proc = subprocess.Popen([sys.executable, os.path.join(_CAMPAGNE_DIR, "train_run.py"),
                                  "--spec", spec_path, "--threads", str(self.threads)],
@@ -125,6 +139,8 @@ class Pool:
         from report import write_reports
         self.phase = phase
         self.total = len(specs)
+        if self.auto:
+            self.threads = threads_par_run(len(specs), os.cpu_count() or 2)
         self.done = {s["run_id"] for s in specs if self.is_done(s)}
         queue = sorted([s for s in specs if s["run_id"] not in self.done],
                        key=_cost_estimate, reverse=True)
@@ -134,6 +150,10 @@ class Pool:
         while queue or self.running:
             stop = os.path.exists(config.STOP_FILE)
             while queue and not stop and len(self.running) < self.workers:
+                self.eval_threads = self.threads
+                if self.auto:       # coeurs libres en fin de phase, pour l'evaluation seulement
+                    self.eval_threads = max(self.threads, ((os.cpu_count() or 2) - COEURS_RESERVES)
+                                            // (len(queue) + len(self.running)))
                 self._launch(queue.pop(0))
             for rid, (proc, spec, t0) in list(self.running.items()):
                 code = proc.poll()
@@ -236,7 +256,8 @@ def main():
     ap.add_argument("--mode", choices=["etape4", "final"], default="etape4")
     ap.add_argument("--finalists", help="JSON des finalistes (mode final)")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) // 2))
-    ap.add_argument("--threads", type=int, default=2)
+    ap.add_argument("--threads", type=lambda v: v if v == "auto" else int(v), default=2,
+                    help="threads par run, ou auto (calcules pour chaque phase)")
     ap.add_argument("--out_dir", default=config.OUT_DIR)
     args = ap.parse_args()
     os.makedirs(os.path.join(args.out_dir, "runs"), exist_ok=True)
