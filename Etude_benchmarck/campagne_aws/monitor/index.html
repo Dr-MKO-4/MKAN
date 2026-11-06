@@ -98,7 +98,26 @@ button.theme:hover { background: var(--ink); color: var(--bg); }
 .barres b { font-weight: 500; }
 body[data-filtre="icare"] [data-proj="mkan"], body[data-filtre="mkan"] [data-proj="icare"] { display: none !important; }
 #projects { align-items: start; }
-body[data-filtre="icare"] #projects { grid-template-columns: 1fr; }
+.projGrid > div { min-width: 0; }
+.projGrid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); margin-top: 14px; }
+.etat { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin-top: 14px; font-size: 17px; letter-spacing: -.01em; }
+.etat .badge { margin-left: 0; }
+.mini { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); margin-top: 12px; }
+.mini div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 11px; min-width: 0; }
+.mini span { display: block; font: 500 10px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--ink2); }
+.mini b { display: block; font-weight: 500; font-size: 16px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+h3.sous { font: 500 11px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); margin: 0 0 6px; }
+.etapes tbody tr, .resultats tbody tr { cursor: default; }
+.etapes tr.cur td { background: var(--accent-soft); }
+.etapes td, .resultats td { padding: 7px 8px; }
+.st { font: 500 11px var(--mono); color: var(--ink2); } .st.ok { color: var(--ok); } .st.cur { color: var(--accent); }
+.resultats td { white-space: normal; vertical-align: top; font-size: 13px; }
+.resultats td.val { font: 12px var(--mono); }
+.resultats td.note { color: var(--ink2); font-size: 12px; }
+.resultats td.alerte { color: var(--warn); }
+@media (max-width: 520px) { .etapes .prog { display: none; } .resultats tr { display: block; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .resultats td { display: block; border: 0; padding: 1px 8px; } }
+body[data-filtre="icare"] #projects { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 600px) {
   header, main { padding-left: 16px; padding-right: 16px; }
   .seg button { padding: 0 11px; }
@@ -137,7 +156,7 @@ body[data-filtre="icare"] #projects { grid-template-columns: 1fr; }
   <section class="grid2">
     <div class="card"><h2>Charge CPU des instances <span class="muted">(%, toutes les 30 s)</span></h2>
       <div class="legend" id="legCpu"></div><div class="chartBox"><canvas id="chCpu"></canvas></div></div>
-    <div class="card"><h2>Avancement <span class="muted">(% de la phase ou de l'étape en cours)</span></h2>
+    <div class="card"><h2>Avancement <span class="muted">(% des runs de la phase MKAN, % des unités confirmatoires Icare)</span></h2>
       <div class="legend" id="legPct"></div><div class="chartBox"><canvas id="chPct"></canvas></div>
       <div class="muted" id="pctSub"></div></div>
   </section>
@@ -260,7 +279,7 @@ function drawHistory(h) {
   const cpu = {labels, datasets: (voirMkan ? [serie("Mémoire MKAN", pts.map(p => p.mkan_cpu), tok("--s1"))] : [])
     .concat(others.map(o => serie(o.name, pts.map(p => p[`${o.prefix}_cpu`] ?? null), tok("--s2"))))};
   const prog = {labels, datasets: (voirMkan ? [serie("Mémoire MKAN", pts.map(p => p.mkan_pct), tok("--s1"))] : [])
-    .concat(others.map(o => serie(o.name, pts.map(p => p[`${o.prefix}_pct`] ?? null), tok("--s2"))))};
+    .concat(others.map(o => serie(o.name, pts.map(p => p[`${o.prefix}_unites_pct`] ?? null), tok("--s2"))))};
   legend("legCpu", items); legend("legPct", items);
   const pr = {min: 0, max: 100};
   chCpu = upsert(chCpu, "chCpu", cpu, options("%", "", pr));
@@ -276,32 +295,73 @@ async function tickHistory() {
 }
 
 // Carte détaillée d'un projet externe (Icare) : état publié par monitor/suivi_icare.py
-function projectDetail(ps) {
-  const s = ps.systeme, b = ps.barre;
+const NOMS_ETAPES = {calibrage: "Calibrage", validation: "Validation", illustrations: "Illustrations",
+                     chronometrage: "Chronométrage", scenarios: "Scénarios", prix: "Prix", texte: "Texte"};
+const nomEtape = e => NOMS_ETAPES[e] || e;
+const pluriel = (n, mot) => `${n} ${mot}${n > 1 ? "s" : ""}`;
+// La barre du journal compte ce qu'il reste depuis la dernière reprise : temps, unité en cours, estimation fiable ou non
+function lireBarre(b) {
+  if (!b) return null;
+  const [ecoule, ...suite] = String(b.temps || "").split(", ");
+  const info = String(b.info || ""), m = info.match(/(\d+) en cours/);
+  const enCours = m ? +m[1] : null, unite = info.includes("|") ? info.split("|").pop().trim() : (m ? "" : info);
+  const restantes = b.total - b.faites, r = suite.join(", ").match(/reste ~(.*)/);
+  return {ecoule, enCours, unite, restantes, reste: r && b.faites > 0 && restantes > (enCours ?? 1) ? r[1] : null};
+}
+const MOIS = {Jan: "janv.", Feb: "févr.", Mar: "mars", Apr: "avr.", May: "mai", Jun: "juin", Jul: "juil.", Aug: "août",
+              Sep: "sept.", Oct: "oct.", Nov: "nov.", Dec: "déc."};
+function ligneJournal(l) {
+  const m = l.match(/^=== \w+ (\w+)\s+(\d+) (\d\d:\d\d):\d\d UTC \d+ (.*)$/);
+  if (!m) return l;
+  const texte = m[4].replace(/"total_usd": ([\d.]+)/, (_, v) => fx(+v, 2) + " $").replace("debut", "début");
+  return `${m[2]} ${MOIS[m[1]] || m[1]} ${m[3]} · ${texte}`;
+}
+function projectDetail(ps, now, calibrage) {
+  const s = ps.systeme, actif = (ps.commandes || []).length > 0, age = (Date.parse(now) - Date.parse(ps.updated)) / 1000;
+  const b = actif ? ps.barre : null, l = lireBarre(b), st = ps.rapide ? ps.etapes_rapide : ps.etapes_complet;
+  const liste = (st?.etapes || []).map(e => {
+    const cur = !!b && b.etape === e.etape && e.total !== null;
+    return {...e, cur, faites: cur ? Math.max(e.faites, e.total - (b.total - b.faites)) : e.faites};
+  });
+  const fini = liste.length > 0 && liste.every(e => e.total !== null && e.faites >= e.total);
+  const etat = age > 180 ? ["Pas de nouvelles", "bad"] : actif ? ["En calcul", "ok"] : fini ? ["Terminé", "ok"] : ["À l'arrêt", "bad"];
+  const coeurs = l?.enCours ?? s.n_processus_actifs;
+  let pourquoi = "";
+  if (age > 180) pourquoi = `Dernier état reçu il y a ${dur(age)} : instance sans doute interrompue par AWS. La reprise est automatique.`;
+  else if (b?.etape === "chronometrage") pourquoi = "Le chronométrage tourne volontairement sur un seul cœur : la charge basse est normale.";
+  else if (l && l.restantes <= coeurs) pourquoi = `Fin d'étape : ${pluriel(l.restantes, "unité restante").replace("unité restantes", "unités restantes")}, qui ${l.restantes > 1 ? "occupent" : "occupe"} ${pluriel(coeurs, "cœur")}. La charge basse est normale, l'étape suivante démarre ensuite.`;
+  else if (!actif && !fini) pourquoi = "Aucune commande en cours : chaîne arrêtée ou en attente d'une décision.";
   const cores = (s.cpu_per_core || []).map((p, i) =>
     `<span title="cœur ${i} : ${p.toFixed(0)} %" style="background:${coreColor(p)}"></span>`).join("");
-  const bs = ps.barres || (b ? [b] : []);
-  const cur = bs.length ? `<div class="barres">${bs.map(x => `<div><b>${esc(x.source || x.etape)}</b> · ${esc(x.etape)} ${x.faites} / ${x.total} unités (${fx(x.pct, 1)} %)
-      <div class="bar"><i style="width:${x.pct}%"></i></div>
-      <div class="muted">${esc(x.temps)}${x.info ? " · dernière : " + esc(x.info) : ""}</div></div>`).join("")}</div>` : "";
-  const st = ps.rapide ? ps.etapes_rapide : ps.etapes_complet;
-  const steps = (st?.etapes || []).map(e => {
-    const w = e.total ? pct(e.faites, e.total) : 0;
-    return `<tr><td>${esc(e.etape)}</td><td class="num">${e.total === null ? "non évaluable" : e.faites + " / " + e.total}</td>
-      <td class="prog"><div class="bar thin ${w >= 100 ? "ok" : ""}"><i style="width:${w}%"></i></div></td></tr>`;
+  const steps = liste.map(e => {
+    const w = e.total ? pct(e.faites, e.total) : 0, ok = e.total !== null && e.faites >= e.total;
+    const lib = ok ? "Terminée" : e.cur ? "En cours" : e.faites > 0 ? "Commencée" : "À venir";
+    return `<tr class="${e.cur ? "cur" : ""}"><td>${esc(nomEtape(e.etape))}</td><td class="st ${ok ? "ok" : e.cur ? "cur" : ""}">${lib}</td>
+      <td class="num">${e.total === null ? "non évaluable" : e.faites + " / " + e.total}</td>
+      <td class="prog"><div class="bar thin ${ok ? "ok" : ""}"><i style="width:${w}%"></i></div></td></tr>`;
   }).join("");
-  const rec = (ps.recentes || []).slice(0, 8).map(r =>
-    `${esc(String(r.t || "").slice(11))} ${esc(r.etape)} ${esc(r.unite)}${r.rapide ? " (essai)" : ""}`).join("<br>");
-  return `<div style="margin-top:12px"><b>${fx(s.cpu_total, 0)} %</b> CPU · ${s.n_processus_actifs} processus actifs sur ${s.n_processus}
-      · charge ${fx(s.load_avg?.[0], 1)} / ${s.n_cores} cœurs · mémoire ${s.mem_used_gb}/${s.mem_total_gb} Go
-      <div class="bar"><i style="width:${s.cpu_total || 0}%"></i></div><div class="cores">${cores}</div></div>
-    <div class="muted" style="margin-top:8px">Commande : ${esc(ps.commande || "aucune (chaîne arrêtée ou terminée)")}
-      · ${ps.unites_derniere_heure ?? 0} unités terminées dans la dernière heure</div>
-    ${cur}
-    ${steps ? `<div class="scroll" style="margin-top:10px"><table><thead><tr><th>Étape ${ps.rapide ? "(essai réduit)" : ""}</th><th class="num">Unités</th><th></th></tr></thead><tbody>${steps}</tbody></table></div>` : ""}
-    ${st?.non_calibres ? `<div class="muted">Paramètres non calibrés : ${esc(st.non_calibres)}</div>` : ""}
-    ${rec ? `<div class="events" style="margin-top:8px">${rec}</div>` : ""}
-    ${(ps.controle || []).length ? `<div class="events" style="margin-top:6px">${ps.controle.map(esc).join("<br>")}</div>` : ""}`;
+  const res = (calibrage || []).map(r => `<tr><td>${esc(r.mesure)}</td><td class="val">${esc(r.valeur)}</td>
+    <td class="note ${r.alerte ? "alerte" : ""}">${r.alerte ? "⚠ " : ""}${esc(r.note)}</td></tr>`).join("");
+  const rec = (ps.recentes || []).slice(0, 6).map(r =>
+    `${esc(String(r.t || "").slice(11))} ${esc(nomEtape(r.etape))} ${esc(r.unite)}${r.rapide ? " (essai)" : ""}`).join("<br>");
+  const jour = (ps.controle || []).filter(x => !/^=== [^:]+ : /.test(x)).slice(-5).reverse().map(x => esc(ligneJournal(x))).join("<br>");
+  return `<div class="etat"><span class="badge ${etat[1]}">${etat[0]}</span>${b ? `<b>${esc(nomEtape(b.etape))}</b>` : ""}
+      ${l?.unite ? `<span class="muted">unité : ${esc(l.unite)}</span>` : ""}</div>
+    ${pourquoi ? `<div class="muted" style="margin-top:6px">${esc(pourquoi)}</div>` : ""}
+    <div class="mini"><div><span>Charge CPU</span><b>${fx(s.cpu_total, 0)} %</b></div>
+      <div><span>Unités en cours</span><b>${coeurs ?? "–"}</b></div>
+      <div><span>Depuis la reprise</span><b>${esc(l?.ecoule || "–")}</b></div>
+      <div><span>Reste</span><b>${l ? (l.reste ? "≈ " + esc(l.reste) : "non estimable") : "–"}</b></div></div>
+    <div class="cores">${cores}</div>
+    <div class="muted" style="margin-top:6px">${s.n_cores} cœurs · mémoire ${s.mem_used_gb} / ${s.mem_total_gb} Go · ${ps.unites_derniere_heure ?? 0} unités terminées en une heure</div>
+    <div class="projGrid">
+      <div>${steps ? `<h3 class="sous">Étapes ${ps.rapide ? "(essai réduit)" : ""}</h3><div class="scroll"><table class="etapes"><tbody>${steps}</tbody></table></div>` : ""}
+        ${st?.non_calibres && st.non_calibres !== "aucun" ? `<div class="muted" style="margin-top:6px">Paramètres non calibrés : ${esc(st.non_calibres)}</div>` : ""}
+        ${jour ? `<h3 class="sous" style="margin-top:14px">Journal de la chaîne (UTC)</h3><div class="events">${jour}</div>` : ""}
+        ${rec ? `<h3 class="sous" style="margin-top:14px">Dernières unités terminées (UTC)</h3><div class="events">${rec}</div>` : ""}</div>
+      ${res ? `<div><h3 class="sous">Résultats du calibrage</h3><div class="scroll"><table class="resultats"><tbody>${res}</tbody></table></div>
+        <div class="muted" style="margin-top:6px">Valeurs lues dans resultats/calibrage/. Résultats confirmatoires : à la fin d'E-02.</div></div>` : ""}
+    </div>`;
 }
 
 function render(st) {
@@ -344,7 +404,7 @@ function render(st) {
       .filter(l => l.trim()).slice(0, 10).map(esc).join("<br>");
     const last = String(p.status?.journal || "").trim().split(/\r|\n/).filter(l => l.trim()).slice(-1).map(esc).join("");
     const age = p.status?.updated ? ` · état du ${new Date(p.status.updated).toLocaleTimeString("fr-FR")}` : "";
-    const detail = p.status?.systeme ? projectDetail(p.status)
+    const detail = p.status?.systeme ? projectDetail(p.status, st.now, p.calibrage)
       : `<div class="muted" style="margin-top:8px;font-family:var(--mono);font-size:12px">${lines}</div>
       ${last ? `<div class="muted" style="margin-top:6px;font-family:var(--mono);font-size:12px">${last.slice(-160)}</div>` : ""}`;
     const col = p.prefix === "mkan" ? tok("--s1") : tok("--s2");

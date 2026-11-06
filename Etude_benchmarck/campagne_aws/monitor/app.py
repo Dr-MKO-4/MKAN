@@ -128,8 +128,73 @@ def _projects() -> list:
         out.append({"name": name, "prefix": prefix, "budget_usd": float(budget),
                     "cost": _s3_json(f"{prefix}/sorties/cost_state.json") or {},
                     "status": _s3_json(f"{prefix}/sorties/statut.json", ttl=20.0) or {},
-                    "sentinel": _s3_json(f"{prefix}/sorties/sentinel_state.json") or {}})
+                    "sentinel": _s3_json(f"{prefix}/sorties/sentinel_state.json") or {},
+                    "calibrage": _calibrage(prefix)})
     return out
+
+
+def _nb(x, d=2):
+    return f"{x:.{d}f}".replace(".", ",")
+
+
+def _calibrage(prefix: str) -> list:
+    """Valeurs retenues par le calibrage, lues telles quelles dans resultats/calibrage/*.json (copie S3)."""
+    def lire(nom):
+        return _s3_json(f"{prefix}/sorties/calibrage/{nom}.json", ttl=900.0) or {}
+
+    def tolerance(d):
+        v, det = d["valeurs"], d["details"]
+        accord = det["part_accord_par_tol"][str(v["tol_rel"])]
+        return "Tolérance", f"{v['tol_rel']:.0e}, plafond {v['n_iter_max']}", f"accord {_nb(100 * accord, 1)} %", False
+
+    def regularisation(d):
+        bord = d["details"]["au_bord_de_la_grille"]
+        return "Régularisation", f"{d['valeurs']['reg_covariance']:g}".replace(".", ","), "au bord de la grille" if bord else "pas au bord", bord
+
+    def relances(d):
+        r = d["details"]["resume"]
+        n = sorted(set(d["valeurs"]["n_init"].values()))
+        return ("Relances EM et VB", " à ".join(str(x) for x in (n[0], n[-1]) if n[0] != n[-1]) or str(n[0]),
+                f"probabilité min. {_nb(r['probabilite_min'])}, {_nb(100 * r['part_cas_probabilite_ge_0_99'], 1)} % des cas à 0,99 ou plus", False)
+
+    def relances_texte(d):
+        v = d["valeurs"]["n_init_texte_confirmatoire"]
+        return "Relances texte", f"pLSA {v['pLSA']}, LDA {v['LDA']}", "", False
+
+    def lda(d):
+        v = d["valeurs"]["lda_hyper"]
+        return "Hyperparamètres LDA", f"alpha {_nb(v['alpha'], 3)}, lissage {_nb(v['lissage'], 4)}", "", False
+
+    def marge(cle):
+        def f(d):
+            bruit, m = d["valeurs"]["bruit_optimisation"][cle], d["details"]["marges"][cle]
+            ctl = d["details"]["controle"][cle]
+            return f"Marge {cle}", f"{_nb(m)} (bruit {_nb(bruit, 3)})", ctl, ctl.startswith("ATTENTION")
+        return f
+
+    def puissance(d):
+        h = d["details"]["hypotheses"]
+        bas = [x["id"] for x in h if x["puissance_obtenue"] == x["puissance_obtenue"] and x["puissance_obtenue"] < 0.8]
+        vides = sum(x["puissance_obtenue"] != x["puissance_obtenue"] for x in h)
+        rep = d["valeurs"]["replications"]
+        note = (f"sous 0,8 : {', '.join(bas)}" if bas else "toutes à 0,8 ou plus") + f" ; {vides} sans variance"
+        return "Réplications", ", ".join(f"{k} {v}" for k, v in rep.items()), note, bool(bas)
+
+    def monte_carlo(d):
+        v = d["valeurs"]
+        return ("Tailles Monte Carlo", f"{v['n_bootstrap_ic']}, {v['n_tirages_posterieur']}, {v['n_bootstrap_modele']}",
+                "bootstrap IC, tirages q, bootstrap modèle", False)
+
+    lignes = []
+    for nom, f in (("tolerance", tolerance), ("regularisation", regularisation), ("n_init", relances),
+                   ("n_init_texte", relances_texte), ("texte", lda), ("marges", marge("ARI")), ("marges", marge("LL")),
+                   ("puissance", puissance), ("monte_carlo", monte_carlo)):
+        try:
+            mesure, valeur, note, alerte = f(lire(nom))
+            lignes.append({"mesure": mesure, "valeur": valeur, "note": note, "alerte": alerte})
+        except (KeyError, TypeError, ValueError, IndexError):       # fichier absent ou format different : ligne omise
+            pass
+    return lignes
 
 
 # Historique (charge CPU et avancement des deux projets), echantillonne toutes les 30 s par un fil
@@ -149,7 +214,9 @@ def _echantillon():
         s = _s3_json(f"{prefix}/sorties/statut.json", ttl=20.0) or {}
         b = s.get("barre") or {}
         pt[f"{prefix}_cpu"] = (s.get("systeme") or {}).get("cpu_total")
-        pt[f"{prefix}_pct"] = b.get("pct")
+        # part des unites des etapes confirmatoires : ne recule pas a une reprise, contrairement a la barre du journal
+        et = [e for e in ((s.get("etapes_complet") or {}).get("etapes") or []) if e["etape"] != "calibrage" and e["total"]]
+        pt[f"{prefix}_unites_pct"] = round(100 * sum(e["faites"] for e in et) / sum(e["total"] for e in et), 2) if et else None
         pt[f"{prefix}_etape"] = b.get("etape")
     return pt
 

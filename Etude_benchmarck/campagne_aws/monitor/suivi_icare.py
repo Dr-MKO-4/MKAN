@@ -126,7 +126,8 @@ def main():
     a = ap.parse_args()
     # journaux suivis : (source, fichier) ; le calibrage complet lance a part ecrit dans calibrage.log
     logs = [("chaîne", os.path.join(a.icare, "resultats", "chaine.log")),
-            ("calibrage complet", os.path.join(a.icare, "resultats", "calibrage.log"))]
+            ("calibrage complet", os.path.join(a.icare, "resultats", "calibrage.log")),
+            ("étapes confirmatoires", os.path.join(a.icare, "resultats", "superviseur_console.txt"))]
     dest = os.path.join(a.icare, "resultats", "statut.json")
     psutil.cpu_percent(percpu=True)
     for p in psutil.process_iter():
