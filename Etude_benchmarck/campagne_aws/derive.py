@@ -86,7 +86,8 @@ def preparer(a):
     # Meme tri que prepare_window_arrays, pour aligner le scenario et le pas sur les lignes.
     ordre = frame.sort_values([ACCOUNT_COL, TIME_COL], kind="mergesort").index.to_numpy()
     pas = frame[TIME_COL].to_numpy()[ordre]
-    scenario = scen["fraudScenario"].fillna("").astype(str).to_numpy()[ordre]
+    # Texte de longueur fixe (et non objets Python) : relu ensuite avec mmap_mode="r"
+    scenario = scen["fraudScenario"].fillna("").astype(str).to_numpy().astype("U16")[ordre]
     arr = prepare_window_arrays(frame, cols)
     W = meta["W"]
     pivot = np.quantile(np.unique(pas), 0.5)
