@@ -6,7 +6,8 @@
 # et l'etape en echec est retentee a la relance suivante.
 # Budget : aucune etape ne demarre au-dela de MKAN_PLAFOND_CHAINE_USD (68 $ par defaut), et la recherche y est
 # arretee, pour garder de quoi faire la derive et le test. Sentinel.py reste l'arret general (76 $).
-# Hors chaine : derive.py (jeu MoMTSim a generer), evaluation sur le test (une seule fois, en dernier).
+# Derive : lancee des que ~/Modelisation/data/derive_features.parquet existe. Hors chaine : evaluation sur le
+# test (une seule fois, en dernier).
 set -uo pipefail
 cd "$(dirname "$0")"
 # shellcheck disable=SC1091
@@ -74,9 +75,17 @@ RECHERCHE=(env OMP_NUM_THREADS=2 python ../run_search.py --device cpu --scratch_
            --eval_workers 30 --sensitivity_max_workers 30)
 mkdir -p "$OUT/recherche"
 
+DERIVE="${MKAN_DERIVE_PATH:-$HOME/Modelisation/data/derive_features.parquet}"
+derive() {    # jeu derive a generer par Miguel (MOMTSIM/generer_derive.py) : reportee tant qu'il manque
+  if [ -f "$DERIVE" ]; then etape derive "${S[@]}" --mode derive --drift "$DERIVE"
+  else echo "=== $(date -u) jeu derive absent ($DERIVE) : derive reportee"; fi
+}
+
 # Ordre convenu : final et baselines, puis raccourci et attribution, le reste, NSGA-II et Sobol en dernier.
+# La derive passe des que son jeu est la (apres les baselines, sinon en fin de chaine).
 etape final               "${S[@]}" --mode final
 etape baselines           "${S[@]}" --mode baselines
+derive
 etape analyse_raccourci   python analyse_raccourci.py --out "$OUT/raccourci.json"
 etape raccourci_emetteur  "${S[@]}" --mode raccourci --variante emetteur
 etape raccourci_tous      "${S[@]}" --mode raccourci --variante tous
@@ -85,4 +94,5 @@ etape multkan             "${S[@]}" --mode multkan
 etape r2_attribution      python r2_attribution.py --workers 16
 etape_plafonnee nsga2     "${RECHERCHE[@]}" --skip-sensitivity
 etape_plafonnee sobol     "${RECHERCHE[@]}"
+derive
 echo "=== $(date -u) chaine parcourue ; echecs eventuels : $M/echecs.log"

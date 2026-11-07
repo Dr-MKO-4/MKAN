@@ -337,6 +337,38 @@ def run_experience(pool: Pool, nom: str, finalists_path: str, variante: str = No
     print(f"[{nom}] termine", flush=True)
 
 
+def run_derive(workers, threads, finalists_path: str, drift_path: str):
+    """Experience S3 : 3 bras (fige, affinage, extension) x finalistes x 5 graines, a partir des modeles
+    finaux. Sorties dans sorties/derive/ (a part : les passes de latence ne les voient pas)."""
+    p = config.FINAL
+    out = os.path.join(config.OUT_DIR, "derive")
+    os.makedirs(os.path.join(out, "runs"), exist_ok=True)
+    pool = Pool(workers, threads, out, "derive")
+    specs = []
+    for regime, archs in _finalistes_par_regime(finalists_path).items():
+        for arch in archs:
+            W = config.CELL_THETA[arch["cell_type"]]["W"]
+            path, input_size = _dataset(regime, W, p["n_windows_train"] or None)
+            if not os.path.exists(os.path.join(path, "derive", "regions.json")):
+                subprocess.run([sys.executable, os.path.join(_CAMPAGNE_DIR, "derive.py"), "preparer",
+                                "--drift_path", drift_path, "--data_dir", path], check=True)
+            for seed in p["seeds"]:
+                fin = make_spec("final", arch["cell_type"], regime, arch["base_by_gate"], seed, p, path,
+                                input_size)
+                run_final = os.path.join(config.OUT_DIR, "runs", fin["run_id"])
+                if not os.path.exists(os.path.join(run_final, "DONE")):
+                    print(f"  [derive] run final absent : {fin['label']}", flush=True)
+                    continue
+                for bras in ("fige", "affinage", "extension"):
+                    specs.append({"phase": "derive", "script": "derive.py", "bras": bras, "cible": "split",
+                                  "run_final_dir": run_final, "cell_type": fin["cell_type"],
+                                  "hidden_size": fin["hidden_size"], "W": W,
+                                  "run_id": hashlib.sha1((fin["run_id"] + bras).encode()).hexdigest()[:16],
+                                  "label": f"{fin['label']} {bras}"})
+    pool.run_phase("derive", specs)
+    print("[derive] termine", flush=True)
+
+
 def _spec_baseline(modele: str, regime: str, W: int, seed: int, protocol: dict, data_dir: str,
                    input_size: int) -> dict:
     theta = config.CELL_THETA["lstm"]
@@ -355,8 +387,9 @@ def _spec_baseline(modele: str, regime: str, W: int, seed: int, protocol: dict, 
 
 def main():
     ap = argparse.ArgumentParser(description="Orchestration de la campagne AWS")
-    ap.add_argument("--mode", choices=["etape4", "final", "preproc", "multkan", "raccourci", "baselines"],
-                    default="etape4")
+    ap.add_argument("--mode", choices=["etape4", "final", "preproc", "multkan", "raccourci", "baselines",
+                                       "derive"], default="etape4")
+    ap.add_argument("--drift", help="mode derive : jeu derive MoMTSim (features)")
     ap.add_argument("--finalists", help="JSON des finalistes (mode final et experiences)")
     ap.add_argument("--variante", choices=sorted(SOLDES), help="raccourci : soldes retires")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) // 2))
@@ -373,6 +406,10 @@ def main():
             ap.error(f"--finalists est requis en mode {args.mode}")
         if args.mode == "final":
             run_final(pool, args.finalists)
+        elif args.mode == "derive":
+            if not args.drift:
+                ap.error("--drift est requis en mode derive")
+            run_derive(args.workers, args.threads, args.finalists, args.drift)
         else:
             run_experience(pool, args.mode, args.finalists, args.variante)
 

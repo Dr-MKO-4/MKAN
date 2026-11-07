@@ -218,7 +218,21 @@ def lancer(a):
     return EXIT_DONE
 
 
+def depuis_spec(chemin: str, threads: int) -> int:
+    """Appel par scheduler.py --mode derive : un run = (run final, bras), sorties dans le dossier du spec."""
+    with open(chemin, encoding="utf-8") as f:
+        s = json.load(f)
+    return lancer(argparse.Namespace(run_dir=s["run_final_dir"], bras=s["bras"], threads=threads,
+                                     out_dir=os.path.dirname(os.path.abspath(chemin)), cible=s.get("cible", "split")))
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--spec":
+        q = argparse.ArgumentParser()
+        q.add_argument("--spec", required=True)
+        q.add_argument("--threads", type=int, default=4)
+        a = q.parse_args()
+        sys.exit(depuis_spec(a.spec, a.threads))
     p = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     s = p.add_subparsers(dest="action", required=True)
     q = s.add_parser("preparer")
