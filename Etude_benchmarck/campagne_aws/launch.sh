@@ -20,7 +20,7 @@ start_bg() {   # nom, commande
 }
 
 case "$MODE" in
-  bench|etape4|final|preproc|multkan|raccourci|baselines)
+  bench|etape4|final|preproc|multkan|raccourci|baselines|chaine)
     rm -f "$OUT/STOP"
     start_bg mkan-sentinel "python sentinel.py"
     start_bg mkan-monitor "python monitor/app.py"
@@ -38,6 +38,8 @@ case "$MODE" in
       "python scheduler.py --mode final --workers ${2:-20} --threads ${3:-3} --finalists ${4:?fichier des finalistes} 2>&1 | tee -a $OUT/scheduler.log" ;;
   preproc|multkan|raccourci|baselines)
     tmux new-session -d -s mkan-sched       "python scheduler.py --mode $MODE --workers ${2:-64} --threads ${3:-auto} --finalists ${4:?fichier des finalistes} ${5:+--variante $5} 2>&1 | tee -a $OUT/scheduler.log" ;;
+  chaine)     # final puis experiences, sans intervention : voir chaine_complete.sh
+    tmux new-session -d -s mkan-sched "bash chaine_complete.sh ${2:-64} ${3:-auto} ${4:?fichier des finalistes} 2>&1 | tee -a $OUT/scheduler.log" ;;
   stop)
     echo "arret demande par l'utilisateur" > "$OUT/STOP"
     echo "STOP cree : chaque run sauvegarde et quitte ; la sentinelle copie vers S3." ;;
