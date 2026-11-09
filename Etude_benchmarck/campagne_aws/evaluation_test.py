@@ -41,13 +41,26 @@ METRIQUES = ("mcc", "auc_pr", "auc_roc", "brier", "f1_best", "precision_at_recal
              "precision_at_recall_0.8")
 
 
-def lister_runs(out_dir: str, phases: list) -> list:
+def _cle_arch(d: dict) -> tuple:
+    return d["cell_type"], d["regime"], tuple(sorted(d["base_by_gate"].items()))
+
+
+def lister_runs(out_dir: str, phases: list, finalists_path: str = None) -> list:
+    """Runs finis des phases demandees. Avec `finalists_path`, les runs de la phase final ne sont gardes que si leur
+    architecture figure dans ce fichier (decision du 09/11 : A traite retire de l'analyse principale)."""
+    gardees = None
+    if finalists_path:
+        with open(finalists_path, encoding="utf-8") as f:
+            gardees = {_cle_arch(x) for x in json.load(f)}
     specs = []
     for done in sorted(glob.glob(os.path.join(out_dir, "runs", "*", "DONE"))):
         with open(os.path.join(os.path.dirname(done), "spec.json"), encoding="utf-8") as f:
             spec = json.load(f)
-        if spec["phase"] in phases:
-            specs.append(spec)
+        if spec["phase"] not in phases:
+            continue
+        if gardees is not None and spec["phase"] == "final" and _cle_arch(spec) not in gardees:
+            continue
+        specs.append(spec)
     return specs
 
 
@@ -129,6 +142,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     p.add_argument("--out_dir", default=config.OUT_DIR)
     p.add_argument("--phases", nargs="+", default=["final", "exp_baselines"])
+    p.add_argument("--finalists", default=os.path.join(config.OUT_DIR, "finalistes.json"),
+                   help="architectures du final a evaluer ; '' pour tous les runs du final")
     p.add_argument("--test_path")
     p.add_argument("--une_seule_fois", action="store_true", help="confirme l'ouverture du test")
     p.add_argument("--verifier_sur_val", action="store_true")
@@ -137,7 +152,7 @@ def main():
     a = p.parse_args()
     from niveau1_harness import compute_metrics
 
-    specs = lister_runs(a.out_dir, a.phases)
+    specs = lister_runs(a.out_dir, a.phases, a.finalists or None)
     for ph in a.phases:
         print(f"{ph} : {sum(s['phase'] == ph for s in specs)} runs finis", flush=True)
     if not specs:
