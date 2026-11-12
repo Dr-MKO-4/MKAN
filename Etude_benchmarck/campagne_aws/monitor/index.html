@@ -96,7 +96,7 @@ button.theme { height: 40px; padding: 0 18px; border-radius: 999px; border: 1px 
 button.theme:hover { background: var(--ink); color: var(--bg); }
 .barres > div { margin-top: 14px; }
 .barres b { font-weight: 500; }
-body[data-filtre="icare"] [data-proj="mkan"], body[data-filtre="mkan"] [data-proj="icare"] { display: none !important; }
+body[data-filtre="nera"] [data-proj="mkan"], body[data-filtre="mkan"] [data-proj="nera"] { display: none !important; }
 #projects { align-items: start; }
 .projGrid > div { min-width: 0; }
 .projGrid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); margin-top: 14px; }
@@ -107,17 +107,10 @@ body[data-filtre="icare"] [data-proj="mkan"], body[data-filtre="mkan"] [data-pro
 .mini span { display: block; font: 500 10px var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--ink2); }
 .mini b { display: block; font-weight: 500; font-size: 16px; margin-top: 3px; font-variant-numeric: tabular-nums; }
 h3.sous { font: 500 11px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); margin: 0 0 6px; }
-.etapes tbody tr, .resultats tbody tr { cursor: default; }
-.etapes tr.cur td { background: var(--accent-soft); }
-.etapes td, .resultats td { padding: 7px 8px; }
-.st { font: 500 11px var(--mono); color: var(--ink2); } .st.ok { color: var(--ok); } .st.cur { color: var(--accent); }
-.resultats td { white-space: normal; vertical-align: top; font-size: 13px; }
-.resultats td.val { font: 12px var(--mono); }
-.resultats td.note { color: var(--ink2); font-size: 12px; }
-.resultats td.alerte { color: var(--warn); }
-@media (max-width: 520px) { .etapes .prog { display: none; } .resultats tr { display: block; padding: 6px 0; border-bottom: 1px solid var(--line); }
-  .resultats td { display: block; border: 0; padding: 1px 8px; } }
-body[data-filtre="icare"] #projects { grid-template-columns: minmax(0, 1fr); }
+.encours { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.encours span { font: 500 11px var(--mono); padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line);
+                background: var(--accent-soft); color: var(--accent); }
+body[data-filtre="nera"] #projects { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 600px) {
   header, main { padding-left: 16px; padding-right: 16px; }
   .seg button { padding: 0 11px; }
@@ -130,7 +123,7 @@ body[data-filtre="icare"] #projects { grid-template-columns: minmax(0, 1fr); }
        <div class="muted" id="updated">connexion…</div></div>
   <div class="tools">
     <div class="seg" id="filtre" role="group" aria-label="Projet affiché">
-      <button type="button" data-f="tout">Tout</button><button type="button" data-f="mkan">Mémoire MKAN</button><button type="button" data-f="icare">Icare</button>
+      <button type="button" data-f="tout">Tout</button><button type="button" data-f="mkan">Mémoire MKAN</button><button type="button" data-f="nera">NERA</button>
     </div>
     <button class="theme" id="themeBtn" type="button">Thème</button>
   </div>
@@ -156,7 +149,7 @@ body[data-filtre="icare"] #projects { grid-template-columns: minmax(0, 1fr); }
   <section class="grid2">
     <div class="card"><h2>Charge CPU des instances <span class="muted">(%, toutes les 30 s)</span></h2>
       <div class="legend" id="legCpu"></div><div class="chartBox"><canvas id="chCpu"></canvas></div></div>
-    <div class="card"><h2>Avancement <span class="muted">(% des runs de la phase MKAN, % des unités confirmatoires Icare)</span></h2>
+    <div class="card"><h2>Avancement <span class="muted">(% des runs de la phase MKAN, % des étapes de la chaîne NERA)</span></h2>
       <div class="legend" id="legPct"></div><div class="chartBox"><canvas id="chPct"></canvas></div>
       <div class="muted" id="pctSub"></div></div>
   </section>
@@ -208,11 +201,11 @@ $("themeBtn").onclick = () => {
   if (lastHist) drawHistory(lastHist);
 };
 let selected = null, chart = null, lastRuns = [];
-// Filtre de projet (Tout, Mémoire MKAN, Icare), mémorisé dans le navigateur
+// Filtre de projet (Tout, Mémoire MKAN, NERA), mémorisé dans le navigateur
 let filtre = "tout", lastHist = null;
 try { filtre = localStorage.getItem("suivi-filtre") || "tout"; } catch (e) {}
-const filtreUrl = new URLSearchParams(location.search).get("filtre");       // lien direct : ?filtre=icare
-if (["tout", "mkan", "icare"].includes(filtreUrl)) filtre = filtreUrl;
+const filtreUrl = new URLSearchParams(location.search).get("filtre");       // lien direct : ?filtre=nera
+if (["tout", "mkan", "nera"].includes(filtreUrl)) filtre = filtreUrl;
 function appliquerFiltre(f) {
   filtre = f;
   document.body.dataset.filtre = f;
@@ -279,7 +272,7 @@ function drawHistory(h) {
   const cpu = {labels, datasets: (voirMkan ? [serie("Mémoire MKAN", pts.map(p => p.mkan_cpu), tok("--s1"))] : [])
     .concat(others.map(o => serie(o.name, pts.map(p => p[`${o.prefix}_cpu`] ?? null), tok("--s2"))))};
   const prog = {labels, datasets: (voirMkan ? [serie("Mémoire MKAN", pts.map(p => p.mkan_pct), tok("--s1"))] : [])
-    .concat(others.map(o => serie(o.name, pts.map(p => p[`${o.prefix}_unites_pct`] ?? null), tok("--s2"))))};
+    .concat(others.map(o => serie(o.name, pts.map(p => p[`${o.prefix}_pct`] ?? null), tok("--s2"))))};
   legend("legCpu", items); legend("legPct", items);
   const pr = {min: 0, max: 100};
   chCpu = upsert(chCpu, "chCpu", cpu, options("%", "", pr));
@@ -294,73 +287,33 @@ async function tickHistory() {
   setTimeout(tickHistory, 30000);
 }
 
-// Carte détaillée d'un projet externe (Icare) : état publié par monitor/suivi_icare.py
-const NOMS_ETAPES = {calibrage: "Calibrage", validation: "Validation", illustrations: "Illustrations",
-                     chronometrage: "Chronométrage", scenarios: "Scénarios", prix: "Prix", texte: "Texte"};
-const nomEtape = e => NOMS_ETAPES[e] || e;
-const pluriel = (n, mot) => `${n} ${mot}${n > 1 ? "s" : ""}`;
-// La barre du journal compte ce qu'il reste depuis la dernière reprise : temps, unité en cours, estimation fiable ou non
-function lireBarre(b) {
-  if (!b) return null;
-  const [ecoule, ...suite] = String(b.temps || "").split(", ");
-  const info = String(b.info || ""), m = info.match(/(\d+) en cours/);
-  const enCours = m ? +m[1] : null, unite = info.includes("|") ? info.split("|").pop().trim() : (m ? "" : info);
-  const restantes = b.total - b.faites, r = suite.join(", ").match(/reste ~(.*)/);
-  return {ecoule, enCours, unite, restantes, reste: r && b.faites > 0 && restantes > (enCours ?? 1) ? r[1] : null};
-}
-const MOIS = {Jan: "janv.", Feb: "févr.", Mar: "mars", Apr: "avr.", May: "mai", Jun: "juin", Jul: "juil.", Aug: "août",
-              Sep: "sept.", Oct: "oct.", Nov: "nov.", Dec: "déc."};
-function ligneJournal(l) {
-  const m = l.match(/^=== \w+ (\w+)\s+(\d+) (\d\d:\d\d):\d\d UTC \d+ (.*)$/);
-  if (!m) return l;
-  const texte = m[4].replace(/"total_usd": ([\d.]+)/, (_, v) => fx(+v, 2) + " $").replace("debut", "début");
-  return `${m[2]} ${MOIS[m[1]] || m[1]} ${m[3]} · ${texte}`;
-}
-function projectDetail(ps, now, calibrage) {
-  const s = ps.systeme, actif = (ps.commandes || []).length > 0, age = (Date.parse(now) - Date.parse(ps.updated)) / 1000;
-  const b = actif ? ps.barre : null, l = lireBarre(b), st = ps.rapide ? ps.etapes_rapide : ps.etapes_complet;
-  const liste = (st?.etapes || []).map(e => {
-    const cur = !!b && b.etape === e.etape && e.total !== null;
-    return {...e, cur, faites: cur ? Math.max(e.faites, e.total - (b.total - b.faites)) : e.faites};
-  });
-  const fini = liste.length > 0 && liste.every(e => e.total !== null && e.faites >= e.total);
-  const etat = age > 180 ? ["Pas de nouvelles", "bad"] : actif ? ["En calcul", "ok"] : fini ? ["Terminé", "ok"] : ["À l'arrêt", "bad"];
-  const coeurs = l?.enCours ?? s.n_processus_actifs;
-  let pourquoi = "";
-  if (age > 180) pourquoi = `Dernier état reçu il y a ${dur(age)} : instance sans doute interrompue par AWS. La reprise est automatique.`;
-  else if (b?.etape === "chronometrage") pourquoi = "Le chronométrage tourne volontairement sur un seul cœur : la charge basse est normale.";
-  else if (l && l.restantes <= coeurs) pourquoi = `Fin d'étape : ${pluriel(l.restantes, "unité restante").replace("unité restantes", "unités restantes")}, qui ${l.restantes > 1 ? "occupent" : "occupe"} ${pluriel(coeurs, "cœur")}. La charge basse est normale, l'étape suivante démarre ensuite.`;
-  else if (!actif && !fini) pourquoi = "Aucune commande en cours : chaîne arrêtée ou en attente d'une décision.";
+// Carte détaillée de NERA : état publié par monitor/suivi_nera.py (étapes de la chaîne, charge, résumé du triage)
+function neraDetail(ps, now) {
+  const s = ps.systeme || {}, e = ps.etapes || {}, age = (Date.parse(now) - Date.parse(ps.updated)) / 1000;
+  const enCours = e.en_cours || [], echecs = e.echecs || [];
+  const etat = age > 180 ? ["Pas de nouvelles", "bad"] : enCours.length ? ["En calcul", "ok"]
+    : e.fini ? (echecs.length ? ["Terminé avec échecs", "bad"] : ["Terminé", "ok"]) : ["À l'arrêt", "bad"];
+  const pourquoi = age > 180 ? `Dernier état reçu il y a ${dur(age)} : instance arrêtée, supprimée ou interrompue par AWS.`
+    : !enCours.length && !e.fini ? "Aucune étape en cours : chaîne arrêtée ou en attente." : "";
+  const w = ps.attendus ? pct(e.faites || 0, ps.attendus) : 0;
   const cores = (s.cpu_per_core || []).map((p, i) =>
     `<span title="cœur ${i} : ${p.toFixed(0)} %" style="background:${coreColor(p)}"></span>`).join("");
-  const steps = liste.map(e => {
-    const w = e.total ? pct(e.faites, e.total) : 0, ok = e.total !== null && e.faites >= e.total;
-    const lib = ok ? "Terminée" : e.cur ? "En cours" : e.faites > 0 ? "Commencée" : "À venir";
-    return `<tr class="${e.cur ? "cur" : ""}"><td>${esc(nomEtape(e.etape))}</td><td class="st ${ok ? "ok" : e.cur ? "cur" : ""}">${lib}</td>
-      <td class="num">${e.total === null ? "non évaluable" : e.faites + " / " + e.total}</td>
-      <td class="prog"><div class="bar thin ${ok ? "ok" : ""}"><i style="width:${w}%"></i></div></td></tr>`;
-  }).join("");
-  const res = (calibrage || []).map(r => `<tr><td>${esc(r.mesure)}</td><td class="val">${esc(r.valeur)}</td>
-    <td class="note ${r.alerte ? "alerte" : ""}">${r.alerte ? "⚠ " : ""}${esc(r.note)}</td></tr>`).join("");
-  const rec = (ps.recentes || []).slice(0, 6).map(r =>
-    `${esc(String(r.t || "").slice(11))} ${esc(nomEtape(r.etape))} ${esc(r.unite)}${r.rapide ? " (essai)" : ""}`).join("<br>");
-  const jour = (ps.controle || []).filter(x => !/^=== [^:]+ : /.test(x)).slice(-5).reverse().map(x => esc(ligneJournal(x))).join("<br>");
-  return `<div class="etat"><span class="badge ${etat[1]}">${etat[0]}</span>${b ? `<b>${esc(nomEtape(b.etape))}</b>` : ""}
-      ${l?.unite ? `<span class="muted">unité : ${esc(l.unite)}</span>` : ""}</div>
+  const evts = (e.evenements || []).map(v => `${esc(v.h)} ${esc(v.nom)} · ${esc(v.etat)}`).join("<br>");
+  const triage = (ps.triage || []).map(esc).join("<br>");
+  return `<div class="etat"><span class="badge ${etat[1]}">${etat[0]}</span></div>
     ${pourquoi ? `<div class="muted" style="margin-top:6px">${esc(pourquoi)}</div>` : ""}
-    <div class="mini"><div><span>Charge CPU</span><b>${fx(s.cpu_total, 0)} %</b></div>
-      <div><span>Unités en cours</span><b>${coeurs ?? "–"}</b></div>
-      <div><span>Depuis la reprise</span><b>${esc(l?.ecoule || "–")}</b></div>
-      <div><span>Reste</span><b>${l ? (l.reste ? "≈ " + esc(l.reste) : "non estimable") : "–"}</b></div></div>
+    <div class="mini"><div><span>Étapes finies</span><b>${e.faites ?? 0}${ps.attendus ? " / " + ps.attendus : ""}</b></div>
+      <div><span>En cours</span><b>${enCours.length}</b></div>
+      <div><span>En échec</span><b>${echecs.length}</b></div>
+      <div><span>Charge CPU</span><b>${fx(s.cpu_total, 0)} %</b></div></div>
+    ${ps.attendus ? `<div class="bar ${echecs.length ? "warn" : "ok"}"><i style="width:${w}%"></i></div>` : ""}
+    ${enCours.length ? `<div class="encours">${enCours.map(n => `<span>${esc(n)}</span>`).join("")}</div>` : ""}
+    ${echecs.length ? `<div class="muted" style="margin-top:6px;color:var(--bad)">Échecs : ${echecs.map(esc).join(", ")}</div>` : ""}
     <div class="cores">${cores}</div>
-    <div class="muted" style="margin-top:6px">${s.n_cores} cœurs · mémoire ${s.mem_used_gb} / ${s.mem_total_gb} Go · ${ps.unites_derniere_heure ?? 0} unités terminées en une heure</div>
+    <div class="muted" style="margin-top:6px">${s.n_cores ?? "?"} cœurs · mémoire ${s.mem_used_gb ?? "?"} / ${s.mem_total_gb ?? "?"} Go · ${s.n_processus ?? 0} processus NERA</div>
     <div class="projGrid">
-      <div>${steps ? `<h3 class="sous">Étapes ${ps.rapide ? "(essai réduit)" : ""}</h3><div class="scroll"><table class="etapes"><tbody>${steps}</tbody></table></div>` : ""}
-        ${st?.non_calibres && st.non_calibres !== "aucun" ? `<div class="muted" style="margin-top:6px">Paramètres non calibrés : ${esc(st.non_calibres)}</div>` : ""}
-        ${jour ? `<h3 class="sous" style="margin-top:14px">Journal de la chaîne (UTC)</h3><div class="events">${jour}</div>` : ""}
-        ${rec ? `<h3 class="sous" style="margin-top:14px">Dernières unités terminées (UTC)</h3><div class="events">${rec}</div>` : ""}</div>
-      ${res ? `<div><h3 class="sous">Résultats du calibrage</h3><div class="scroll"><table class="resultats"><tbody>${res}</tbody></table></div>
-        <div class="muted" style="margin-top:6px">Valeurs lues dans resultats/calibrage/. Résultats confirmatoires : à la fin d'E-02.</div></div>` : ""}
+      ${evts ? `<div><h3 class="sous">Chaîne des lits (heure de l'instance)</h3><div class="events">${evts}</div></div>` : ""}
+      ${triage ? `<div><h3 class="sous">Triage</h3><div class="events">${triage}</div></div>` : ""}
     </div>`;
 }
 
@@ -404,7 +357,7 @@ function render(st) {
       .filter(l => l.trim()).slice(0, 10).map(esc).join("<br>");
     const last = String(p.status?.journal || "").trim().split(/\r|\n/).filter(l => l.trim()).slice(-1).map(esc).join("");
     const age = p.status?.updated ? ` · état du ${new Date(p.status.updated).toLocaleTimeString("fr-FR")}` : "";
-    const detail = p.status?.systeme ? projectDetail(p.status, st.now, p.calibrage)
+    const detail = p.status?.type === "nera" ? neraDetail(p.status, st.now)
       : `<div class="muted" style="margin-top:8px;font-family:var(--mono);font-size:12px">${lines}</div>
       ${last ? `<div class="muted" style="margin-top:6px;font-family:var(--mono);font-size:12px">${last.slice(-160)}</div>` : ""}`;
     const col = p.prefix === "mkan" ? tok("--s1") : tok("--s2");

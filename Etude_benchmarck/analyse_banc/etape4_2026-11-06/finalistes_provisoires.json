@@ -1,0 +1,38 @@
+{
+ "provisoire": true,
+ "latence_complete": true,
+ "finalistes": [
+  {
+   "arch": "GRU DoG/DoG/DoG (traité)",
+   "roles": [
+    "fitness",
+    "symbolisation"
+   ]
+  },
+  {
+   "arch": "GRU DoG/ReLU/DoG (traité)",
+   "roles": [
+    "detection"
+   ]
+  },
+  {
+   "arch": "Uniforme GRU Hyb/Hyb/Hyb (traité)",
+   "roles": [
+    "rapidite"
+   ]
+  },
+  {
+   "arch": "TKAN ReLU/B-spl/DoG/Lin",
+   "roles": [
+    "B conservee"
+   ]
+  }
+ ],
+ "regle_preenregistree": {
+  "meilleure": "GRU DoG/DoG/DoG (traité)",
+  "ex_aequo": [
+   "GRU DoG/DoG/DoG (traité)"
+  ],
+  "retenue": "GRU DoG/DoG/DoG (traité)"
+ }
+}
