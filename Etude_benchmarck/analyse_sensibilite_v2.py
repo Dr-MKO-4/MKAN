@@ -70,8 +70,50 @@ def main():
                 + "\n".join(tex) + "\n\\bottomrule\n\\end{tabular}\n\\end{adjustbox}\n\\end{table}\n")
     chemin_sobol = os.path.join(a.dossier, "sobol_results.json")
     if os.path.exists(chemin_sobol):
+        from scipy import stats
         s = json.load(open(chemin_sobol, encoding="utf-8"))
-        md += ["", "## Sobol", "", "```", json.dumps(s, ensure_ascii=False)[:3000], "```"]
+        S = s["results"]
+        noms = [r["param_name"] for r in S]
+        XS = np.load(os.path.join(a.dossier, "sobol_X.npy"))
+        YS = np.load(os.path.join(a.dossier, "sobol_Y.npy"))
+        D = XS.shape[1]
+        G = D + 2
+        N = len(YS) // G
+        Ya = YS[0::G]
+        # parametre jamais modifie dans sa decision : la sortie ne change sur aucun groupe A -> AB_j
+        jamais = [noms[j] for j in range(D) if np.all(np.abs(YS[1 + j::G] - Ya) < 1e-12)]
+        bascule = {}
+        for nm in ("Cell_Type", "Input_Regime"):
+            if nm in noms:
+                j = noms.index(nm)
+                bascule[nm] = int(np.sum((XS[0::G, j] < 0.5) != (XS[G - 1::G, j] < 0.5)))
+        sig = [r["param_name"] for r in S if r["S_Ti"] - r["S_Ti_conf_95"] > 0]
+        mstar = {r["param_name"]: r["mu_star"] for r in R}
+        commun = [n_ for n_ in noms if n_ in mstar]
+        rho = stats.spearmanr([mstar[n_] for n_ in commun], [next(r["S_Ti"] for r in S if r["param_name"] == n_) for n_ in commun])
+        Ss = sorted(S, key=lambda r: -r["S_Ti"])
+        md += ["", "## Sobol", "",
+               f"N = {N} points de base, {len(YS)} évaluations, second ordre non calculé.",
+               f"- Évaluations effondrées (fitness < 0,30) : {int((YS < 0.30).sum())} sur {len(YS)}.",
+               f"- Indices de premier ordre négatifs : {sum(r['S_i'] < 0 for r in S)} sur {D} ; somme des indices totaux : "
+               f"{fr(sum(r['S_Ti'] for r in S), 2)}.",
+               f"- Indices totaux dont la borne basse à 95 % dépasse 0 : {len(sig)} ({', '.join(sig)}).",
+               f"- Paramètres dont la modification ne change jamais la sortie dans l'échantillon : {', '.join(jamais)}.",
+               f"- Groupes où le paramètre binaire change de valeur entre A et B (sur {N}) : {bascule}.",
+               f"- Corrélation de Spearman entre mu* de Morris et S_T de Sobol : {fr(rho.statistic, 2)} (p = {fr(rho.pvalue, 3)}).", "",
+               "| Hyperparamètre | S_i | IC 95 % | S_Ti | IC 95 % | Part active |", "|---|---|---|---|---|---|"]
+        md += [f"| {r['param_name']} | {fr(r['S_i'])} | {fr(r['S_i_conf_95'])} | {fr(r['S_Ti'])} | {fr(r['S_Ti_conf_95'])} | "
+               f"{fr(r['P_active'], 2)} |" for r in Ss]
+        texs = [" & ".join([nom(r), fr(r["S_i"]), "$\\pm$ " + fr(r["S_i_conf_95"]), fr(r["S_Ti"]), "$\\pm$ " + fr(r["S_Ti_conf_95"])])
+                + " \\\\" for r in Ss[:a.n_tableau]]
+        with open(os.path.join(RACINE, "memoire", "tableaux_banc", "tab_sobol.tex"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("\\begin{table}[htbp]\n\\centering\n\\footnotesize\n"
+                    f"\\caption{{Indices de Sobol de la recherche réexécutée, à titre indicatif ($N = {N}$, {len(YS)} évaluations) : "
+                    f"les {a.n_tableau} plus forts indices totaux $S_{{Ti}}$, avec l'indice de premier ordre $S_i$ et les "
+                    "intervalles à $95\\,\\%$ (bootstrap, validation)}\n\\label{tab:sobol}\n"
+                    "\\begin{adjustbox}{max width=\\textwidth}\n\\begin{tabular}{@{}lrrrr@{}}\n\\toprule\n"
+                    "\\textbf{Hyperparamètre} & $S_i$ & \\textbf{IC 95\\,\\%} & $S_{Ti}$ & \\textbf{IC 95\\,\\%} \\\\\n\\midrule\n"
+                    + "\n".join(texs) + "\n\\bottomrule\n\\end{tabular}\n\\end{adjustbox}\n\\end{table}\n")
     out = os.path.join(ICI, "analyse_banc", "recherche_v2")
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "ANALYSE_SENSIBILITE_V2.md"), "w", encoding="utf-8", newline="\n") as f:
