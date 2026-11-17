@@ -134,10 +134,13 @@ def main():
             gv = gv.set_index("seed")
             l = {"regime": regime, "W": W, "variante": variante, "n_variables": int(gv.n_variables.iloc[0]),
                  "mcc": gv.mcc.mean(), "mcc_sd": gv.mcc.std(ddof=1), "auc_pr": gv.auc_pr.mean(), "perf": gv.perf.mean(),
-                 "rappel": gv.rappel.mean(), "taux_faux_positifs": gv.taux_faux_positifs.mean()}
+                 "perf_sd": gv.perf.std(ddof=1), "rappel": gv.rappel.mean(), "taux_faux_positifs": gv.taux_faux_positifs.mean()}
             if variante != "complet":
-                e = gv.mcc - ref.mcc
-                l.update(ecart_mcc=e.mean(), ecart_mcc_sd=e.std(ddof=1), p=stats.ttest_rel(gv.mcc, ref.mcc).pvalue)
+                # Le score perf (MCC, PR-AUC, Brier pondérés par AHP) est la mesure de détection du mémoire ;
+                # l'écart de MCC est gardé pour information.
+                e, em = gv.perf - ref.perf, gv.mcc - ref.mcc
+                l.update(ecart_perf=e.mean(), ecart_perf_sd=e.std(ddof=1), p=stats.ttest_rel(gv.perf, ref.perf).pvalue,
+                         ecart_mcc=em.mean(), ecart_mcc_sd=em.std(ddof=1))
             res.append(l)
     r = pd.DataFrame(res)
     masque = r.p.notna()
@@ -150,29 +153,30 @@ def main():
     noms = {"brut": "brut", "traite": "traité"}
     md = ["# Contrôle du raccourci par les soldes, sur XGBoost", "",
           f"Validation uniquement, {len(SEEDS)} graines, {int(d.n_train.iloc[0])} fenêtres d'entraînement. "
-          "Écart de MCC apparié par graine à la version complète, p corrigés par Holm.", "",
-          "| Régime | W | Variante | Variables | MCC | PR-AUC | Rappel | Faux positifs | Écart de MCC | p corrigé |",
-          "|---|---|---|---|---|---|---|---|---|---|"]
+          "Écart de score perf apparié par graine à la version complète, p corrigés par Holm.", "",
+          "| Régime | W | Variante | Variables | perf | MCC | PR-AUC | Rappel | Faux positifs | Écart de perf | Écart de MCC | p corrigé |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     tex = []
     for _, l in r.iterrows():
-        ecart = "" if pd.isna(l.get("ecart_mcc")) else f"{fr(l.ecart_mcc)} ± {fr(l.ecart_mcc_sd)}"
-        md.append(f"| {noms[l.regime]} | {l.W} | {l.variante} | {l.n_variables} | {fr(l.mcc)} ± {fr(l.mcc_sd)} | "
-                  f"{fr(l.auc_pr)} | {fr(l.rappel)} | {fr(l.taux_faux_positifs, 5)} | {ecart} | {pv(l.get('p_holm'))} |")
+        ecart = "" if pd.isna(l.get("ecart_perf")) else f"{fr(l.ecart_perf)} ± {fr(l.ecart_perf_sd)}"
+        ecart_m = "" if pd.isna(l.get("ecart_mcc")) else f"{fr(l.ecart_mcc)} ± {fr(l.ecart_mcc_sd)}"
+        md.append(f"| {noms[l.regime]} | {l.W} | {l.variante} | {l.n_variables} | {fr(l.perf)} ± {fr(l.perf_sd)} | {fr(l.mcc)} ± {fr(l.mcc_sd)} | "
+                  f"{fr(l.auc_pr)} | {fr(l.rappel)} | {fr(l.taux_faux_positifs, 5)} | {ecart} | {ecart_m} | {pv(l.get('p_holm'))} |")
         tex.append(" & ".join([f"{noms[l.regime]}, $W = {l.W}$", l.variante, str(l.n_variables),
-                               f"{fr(l.mcc)} $\\pm$ {fr(l.mcc_sd)}", fr(l.auc_pr), fr(l.rappel),
+                               f"{fr(l.perf)} $\\pm$ {fr(l.perf_sd)}", fr(l.mcc), fr(l.rappel),
                                ecart.replace("±", "$\\pm$") or "", pv(l.get("p_holm")).replace("<", "$<$")]) + " \\\\")
-    md += ["", "Lecture : une chute nette du MCC sans les soldes signifie que la détection s'appuie sur l'arithmétique "
+    md += ["", "Lecture : une chute nette du score perf sans les soldes signifie que la détection s'appuie sur l'arithmétique "
                "des soldes du simulateur. Contrôle fait sur XGBoost, pas sur les cellules KAN."]
     with open(os.path.join(a.out, "ANALYSE_RACCOURCI_XGBOOST.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(md) + "\n")
     with open(os.path.join(a.tex, "tab_raccourci_xgboost.tex"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\\begin{table}[htbp]\n\\centering\n\\footnotesize\n"
                 "\\caption{Contrôle du raccourci par les soldes sur XGBoost : détection avec et sans les colonnes de solde, "
-                "moyenne $\\pm$ écart-type sur cinq graines, écart de MCC apparié à la version complète et $p$ corrigé "
+                "moyenne $\\pm$ écart-type sur cinq graines, écart de score perf apparié à la version complète et $p$ corrigé "
                 "par la méthode de Holm (validation)}\n\\label{tab:raccourci-xgboost}\n"
                 "\\begin{adjustbox}{max width=\\textwidth}\n\\begin{tabular}{@{}llrrrrrr@{}}\n\\toprule\n"
-                "\\textbf{Régime} & \\textbf{Variante} & \\textbf{Variables} & \\textbf{MCC} & \\textbf{PR-AUC} & "
-                "\\textbf{Rappel} & \\textbf{Écart de MCC} & $p$ \\\\\n\\midrule\n" + "\n".join(tex)
+                "\\textbf{Régime} & \\textbf{Variante} & \\textbf{Variables} & \\textbf{perf} & \\textbf{MCC} & "
+                "\\textbf{Rappel} & \\textbf{Écart de perf} & $p$ \\\\\n\\midrule\n" + "\n".join(tex)
                 + "\n\\bottomrule\n\\end{tabular}\n\\end{adjustbox}\n\\end{table}\n")
     print("\n".join(md))
 
