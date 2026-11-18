@@ -20,6 +20,7 @@ ICI = os.path.dirname(os.path.abspath(__file__))
 CKPT = os.path.join(ICI, "..", "checkpoints")
 FINAL = os.path.join(ICI, "campagne_aws", "resultats_instance", "final_2026-11-08")
 CAMP = os.path.join(ICI, "campagne_aws", "resultats_instance", "campagne_2026-11-13")
+V2 = os.path.join(ICI, "campagne_aws", "resultats_instance", "campagne_v2")
 ANA = os.path.join(ICI, "analyse_banc", "final_2026-11-08")
 VARIANTES = {
     "reseau": "réseau complet",
@@ -33,7 +34,9 @@ VARIANTES = {
 
 def main():
     cat = json.load(open(os.path.join(CKPT, "modeles_tableau_de_bord.json"), encoding="utf-8"))
-    runs = pd.read_csv(os.path.join(FINAL, "runs.csv")).set_index("run_id")
+    # campagne_v2 contient en plus la GRU FasterKAN/FasterKAN/DoG (modèle retenu le 18/11), entraînée après le final
+    runs = pd.concat([pd.read_csv(os.path.join(FINAL, "runs.csv")), pd.read_csv(os.path.join(V2, "runs.csv"))])
+    runs = runs.drop_duplicates("run_id").set_index("run_id")
     att = pd.read_csv(os.path.join(CAMP, "r2_attribution.csv")).set_index("run_id")
     fid = pd.read_csv(os.path.join(ANA, "fidelite_formule.csv"))
     are = pd.read_csv(os.path.join(ANA, "fidelite_aretes.csv"))
@@ -76,7 +79,8 @@ def main():
         out[m["fichier"]] = e
     chemin = os.path.join(CKPT, "explications_tableau_de_bord.json")
     with open(chemin, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump({"source": "analyses du mémoire, validation seulement (test non lu)", "modeles": out}, fh,
+        json.dump({"source": "analyses du mémoire sur la validation (fidélité et scénarios mesurés sur les finalistes, "
+                             "pas sur la GRU FasterKAN ; test : voir le mémoire)", "modeles": out}, fh,
                   ensure_ascii=False, indent=1)
     print(chemin, ":", ", ".join(f"{k} ({'fidélité' if 'fidelite' in v else 'sans fidélité'})" for k, v in out.items()))
 
