@@ -35,7 +35,8 @@ NOMS = {"delta_B_orig": "$\\Delta B_{orig}$", "delta_B_dest": "$\\Delta B_{dest}
         "flag_anomalie": "drapeau d'anomalie", "delta_commission": "écart de commission",
         "var_agent_split": "variance agent-client", "rho_rupture": "ratio de rupture", "rho_refund": "ratio de remboursement",
         "v1h": "vélocité sur 1 h", "flag_nuit": "drapeau nocturne", "rho_nouveau": "part de nouveaux destinataires"}
-KAN = {"GRU traite F=dog I=dog C=dog": "GRUKANCell DoG/DoG/DoG", "GRU traite F=dog I=relu C=dog": "GRUKANCell DoG/ReLU-KAN/DoG",
+KAN = {"GRU traite F=fasterkan I=fasterkan C=dog": "GRUKANCell FasterKAN/FasterKAN/DoG (retenu)",
+       "GRU traite F=dog I=dog C=dog": "GRUKANCell DoG/DoG/DoG", "GRU traite F=dog I=relu C=dog": "GRUKANCell DoG/ReLU-KAN/DoG",
        "GRU traite F=hyb I=hyb C=hyb": "GRUKANCell hybride"}
 
 

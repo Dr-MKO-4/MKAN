@@ -91,7 +91,8 @@ def joli(m):
     for cle, nom in (("xgboost", "XGBoost"), ("lstm", "LSTM"), ("mlp", "MLP")):
         if cle in m:
             return f"{nom}, {reg}"
-    courts = {"dog": "DoG", "relu": "ReLU-KAN", "bspl": "B-spline", "hyb": "hybride", "lin": "linéaire", "morl": "Morlet"}
+    courts = {"dog": "DoG", "relu": "ReLU-KAN", "bspl": "B-spline", "hyb": "hybride", "lin": "linéaire", "morl": "Morlet",
+              "fasterkan": "FasterKAN"}
     bases = [courts.get(x.split("=")[1], x.split("=")[1]) for x in m.split() if "=" in x]
     cellule = "GRUKANCell" if m.startswith("GRU") else "TKANCell"
     return f"{cellule} {'/'.join(bases)}, {reg}"
@@ -112,9 +113,13 @@ def holm(p):
     return adj
 
 
-def analyse_scores(final_dir, tolerance):
-    runs = pd.read_csv(os.path.join(final_dir, "runs.csv"))
+def analyse_scores(final_dir, tolerance, v2_dir=None):
+    runs = pd.read_csv(os.path.join(final_dir, "runs.csv")).assign(dossier=final_dir)
     runs = runs[runs.phase.isin(["final", "exp_baselines"])]
+    if v2_dir and os.path.exists(os.path.join(v2_dir, "runs.csv")):
+        # GRU FasterKAN/FasterKAN/DoG, modèle retenu le 18/11, entraînée après le final (campagne_v2)
+        v2 = pd.read_csv(os.path.join(v2_dir, "runs.csv")).assign(dossier=v2_dir)
+        runs = pd.concat([runs, v2[(v2.phase == "final") & v2.label.str.contains("fasterkan")]], ignore_index=True)
     finalistes_path = os.path.join(final_dir, "finalistes_4.json")      # 4 finalistes (A traite retire le 09/11)
     if not os.path.exists(finalistes_path):
         finalistes_path = os.path.join(final_dir, "finalistes.json")
@@ -124,14 +129,14 @@ def analyse_scores(final_dir, tolerance):
             gardes = json.load(f)
     cache, lignes, ecartes = {}, [], []
     for _, r in runs.iterrows():
-        d = os.path.join(final_dir, "runs", r.run_id)
+        d = os.path.join(r.dossier, "runs", r.run_id)
         chemin = os.path.join(d, "val_scores.npy")
         if not os.path.exists(chemin):
             ecartes.append((r.label, "val_scores.npy absent"))
             continue
         with open(os.path.join(d, "spec.json"), encoding="utf-8") as f:
             spec = json.load(f)
-        if r.phase == "final" and gardes is not None:
+        if r.phase == "final" and gardes is not None and r.dossier == final_dir:
             cles = [(a["cell_type"], a["regime"], json.dumps(a["base_by_gate"], sort_keys=True)) for a in gardes]
             cle = (spec["cell_type"], spec["regime"], json.dumps(spec.get("base_by_gate", {}), sort_keys=True))
             if cle not in cles:
@@ -224,7 +229,7 @@ def main():
     a = ap.parse_args()
     os.makedirs(os.path.join(a.out, "figures"), exist_ok=True)
 
-    par_run, ecartes = analyse_scores(a.final, a.tolerance)
+    par_run, ecartes = analyse_scores(a.final, a.tolerance, os.path.join(base, "campagne_v2"))
     if par_run.empty:
         raise SystemExit("Aucun entrainement n'a passe le controle d'integrite : " + str(ecartes))
     par_run.to_csv(os.path.join(a.out, "scenarios_par_run.csv"), index=False)

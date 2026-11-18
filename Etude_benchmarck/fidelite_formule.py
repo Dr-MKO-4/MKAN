@@ -48,9 +48,11 @@ NOMS_PORTES = {"forget_gate": "Forget", "input_gate": "Input", "candidate_gate":
 THETA = 0.01
 DOMAINE = 2.0
 # graine de score perf median de chaque finaliste (catalogue du tableau de bord)
-DEFAUT = [("GRU traite F=dog I=dog C=dog", 1), ("GRU traite F=dog I=relu C=dog", 1),
+DEFAUT = [("GRU traite F=fasterkan I=fasterkan C=dog", 1),           # modèle retenu (18/11), runs de campagne_v2
+          ("GRU traite F=dog I=dog C=dog", 1), ("GRU traite F=dog I=relu C=dog", 1),
           ("GRU traite F=hyb I=hyb C=hyb", 4), ("TKAN brut F=relu I=bspl C=dog O=lin", 5)]
-JOLI = {"GRU traite F=dog I=dog C=dog": "GRUKANCell DoG/DoG/DoG, traité",
+JOLI = {"GRU traite F=fasterkan I=fasterkan C=dog": "GRUKANCell FasterKAN/FasterKAN/DoG (modèle retenu), traité",
+        "GRU traite F=dog I=dog C=dog": "GRUKANCell DoG/DoG/DoG, traité",
         "GRU traite F=dog I=relu C=dog": "GRUKANCell DoG/ReLU-KAN/DoG, traité",
         "GRU traite F=hyb I=hyb C=hyb": "GRUKANCell hybride, traité",
         "TKAN brut F=relu I=bspl C=dog O=lin": "TKANCell ReLU-KAN/B-spline/DoG/linéaire, brut"}
@@ -274,13 +276,18 @@ def main():
     ap = argparse.ArgumentParser()
     base = os.path.join(ICI, "campagne_aws", "resultats_instance", "final_2026-11-08")
     ap.add_argument("--final", default=base)
+    ap.add_argument("--v2", default=os.path.join(ICI, "campagne_aws", "resultats_instance", "campagne_v2"),
+                    help="campagne contenant la GRU FasterKAN/FasterKAN/DoG (modèle retenu), entraînée après le final")
     ap.add_argument("--n-eval", type=int, default=20_000)
     ap.add_argument("--threads", type=int, default=os.cpu_count())
     ap.add_argument("--out", default=os.path.join(ICI, "analyse_banc", "final_2026-11-08"))
     ap.add_argument("--tex", default=os.path.join(RACINE, "memoire", "tableaux_banc"))
     a = ap.parse_args()
     torch.set_num_threads(a.threads)
-    runs = pd.read_csv(os.path.join(a.final, "runs.csv"))
+    runs = pd.read_csv(os.path.join(a.final, "runs.csv")).assign(dossier=a.final)
+    if os.path.exists(os.path.join(a.v2, "runs.csv")):
+        v2 = pd.read_csv(os.path.join(a.v2, "runs.csv")).assign(dossier=a.v2)
+        runs = pd.concat([runs, v2[v2.label.str.contains("fasterkan")]], ignore_index=True)
     runs = runs[runs.phase == "final"]
     chemin, chemin_a = os.path.join(a.out, "fidelite_formule.csv"), os.path.join(a.out, "fidelite_aretes.csv")
     F = pd.read_csv(chemin) if os.path.exists(chemin) else pd.DataFrame()
@@ -295,7 +302,7 @@ def main():
             print("absent :", label, seed)
             continue
         print(f"[{label} s{seed}]", flush=True)
-        f, ar, total = traiter(os.path.join(a.final, "runs", r.run_id.iloc[0]), a.n_eval, cache)
+        f, ar, total = traiter(os.path.join(r.dossier.iloc[0], "runs", r.run_id.iloc[0]), a.n_eval, cache)
         f.insert(0, "modele", label); f.insert(1, "seed", seed); f["aretes_total"] = total
         ar.insert(0, "modele", label)
         F, AR = pd.concat([F, f], ignore_index=True), pd.concat([AR, ar], ignore_index=True)
