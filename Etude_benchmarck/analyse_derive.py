@@ -21,7 +21,8 @@ from scipy import stats
 
 ICI = os.path.dirname(os.path.abspath(__file__))
 RACINE = os.path.abspath(os.path.join(ICI, "..", ".."))
-JOLI = {"GRU traite F=dog I=dog C=dog": "GRUKANCell DoG/DoG/DoG", "GRU traite F=dog I=relu C=dog": "GRUKANCell DoG/ReLU-KAN/DoG",
+JOLI = {"GRU traite F=fasterkan I=fasterkan C=dog": "GRUKANCell FasterKAN/FasterKAN/DoG (retenu)",
+        "GRU traite F=dog I=dog C=dog": "GRUKANCell DoG/DoG/DoG", "GRU traite F=dog I=relu C=dog": "GRUKANCell DoG/ReLU-KAN/DoG",
         "GRU traite F=hyb I=hyb C=hyb": "GRUKANCell hybride", "TKAN brut F=relu I=bspl C=dog O=lin": "TKANCell B (brut)"}
 BRAS = ["fige", "affinage", "extension"]
 NOM_BRAS = {"fige": "figé", "affinage": "affinage seul", "extension": "extension et affinage"}
@@ -46,7 +47,7 @@ def holm(p):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dossier", default=os.path.join(ICI, "campagne_aws", "resultats_instance", "campagne_2026-11-16", "derive"))
+    ap.add_argument("--dossier", default=os.path.join(ICI, "campagne_aws", "resultats_instance", "campagne_v2", "derive"))   # 75 runs : 4 finalistes + modèle retenu
     a = ap.parse_args()
     lignes = []
     for f in sorted(glob.glob(os.path.join(a.dossier, "runs", "*", "resultat.json"))):

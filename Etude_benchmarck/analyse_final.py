@@ -310,7 +310,8 @@ def etape4_contre_final(dossier_e4: str, fin: list) -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _court(a) -> str:
-    return a["arch"].replace(" (traité)", " traitée").replace("Uniforme GRU Hyb/Hyb/Hyb", "GRU uniforme hybride")
+    return (a["arch"].replace(" (traité)", " traitée").replace("Uniforme GRU Hyb/Hyb/Hyb", "GRU uniforme hybride")
+            .replace("fasterkan/fasterkan", "FasterKAN/FasterKAN"))
 
 
 def fig_final_graines(fin, sortie, etat):
@@ -602,7 +603,7 @@ def main():
     ecrire_csv(os.path.join(out, "final_etape4_contre_final.csv"), e4)
     ecrire_rapport(os.path.join(out, "ANALYSE_FINAL.md"), dossier, runs, agg, fin, fin_a, ref, front, comp, eff, e4,
                    integ, _lire_json(os.path.join(dossier, "raccourci.json")))
-    resume = f"résultats partiels, validation, {len(runs)} entraînements"
+    resume = "validation, cinq graines"
     ecrire_tableaux(args.tab_dir, fin, ref, comp, eff, resume)
 
     sortie = Sortie(os.path.join(out, "figures"), args.fig_dir, not args.no_png)
