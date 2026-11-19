@@ -174,6 +174,24 @@ class TestComputeFitness:
             assert isinstance(comp[key], float)
             assert not math.isnan(comp[key]) and not math.isinf(comp[key])
 
+    def test_reglages_de_la_campagne(self, synthetic_df):
+        """13/11 : seuil de latence, penalite plafonnee, R2 a 0,80 et grille recalee passes a compute_fitness."""
+        ind = _minimal_individual()
+        g0 = next(iter(ind["gates"]))                  # une porte a base a grille : la grille doit etre recalee
+        ind["gates"][g0] = {"Base": "efficientkan", **{k: v[0] for k, v in BASE_PARAM_SPACE["efficientkan"]["params"].items()}}
+        result = compute_fitness(ind, synthetic_df, synthetic_df, device="cpu",
+                                 n_windows_eval=1000, n_epochs_eval=1,
+                                 latency_threshold_ms=500.0, latency_penalty_capped=True,
+                                 r2_threshold=0.80, grid_init="data", latency_ms_override=750.0)
+        assert result["error"] is None, result["error"]
+        comp = result["fitness_components"]
+        assert comp["latency_threshold_ms"] == 500.0 and comp["latency_penalty_capped"] is True
+        assert math.isclose(comp["penalty_lat"], 0.5)          # min(1, (750 - 500) / 500)
+        assert comp["r2_threshold"] == 0.80
+        assert comp["R2_symbolic"] >= comp["R2_symbolic_0.99"]   # seuil plus bas : au moins autant d'aretes
+        assert comp["grid_init"] == "data"
+        assert comp["grilles_recalees"] >= 1, comp["grilles_recalees"]
+
     def test_mcc_clipped_is_nonneg_max_of_raw(self, synthetic_df):
         ind = _minimal_individual()
         result = compute_fitness(ind, synthetic_df, synthetic_df, device="cpu",
@@ -503,3 +521,40 @@ class TestNsga2Core:
         search._components = [_fc(0.5, 0.5, 0.2, 0.3, 50), _fc(0.5, 0.5, 0.2, 0.3, 500)]
         search._compute_rank_and_crowding()
         assert search._rank[0] == search._rank[1] == 0   # même front : latence ignorée
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Coeurs reserves a la mesure de latence (13/11)
+# ══════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.skipif(not hasattr(os, "sched_setaffinity") or (os.cpu_count() or 1) < 4,
+                    reason="affinite des fils : Linux et au moins 4 coeurs")
+def test_coeurs_latence_mesure_puis_restitue(monkeypatch):
+    import threading
+    from extended_heuristic_search import coeurs_latence
+    n = os.cpu_count()
+    reserve = {n - 2, n - 1}
+    origine = os.sched_getaffinity(0)
+    monkeypatch.setenv("MKAN_LATENCY_CORES", f"{n - 2}-{n - 1}")
+    vus = {}
+    with coeurs_latence():
+        vus["principal"] = os.sched_getaffinity(0)
+        t = threading.Thread(target=lambda: vus.__setitem__("cree", os.sched_getaffinity(0)))
+        t.start(); t.join()
+        attente = threading.Event()
+        survivant = threading.Thread(target=attente.wait)       # fil cree pendant la mesure, encore vivant apres
+        survivant.start()
+        tid = survivant.native_id
+    assert vus["principal"] == reserve and vus["cree"] == reserve
+    assert os.sched_getaffinity(0) == origine
+    assert os.sched_getaffinity(tid) == origine                 # revenu aux coeurs d'origine
+    attente.set(); survivant.join()
+
+
+def test_coeurs_latence_sans_variable_ne_change_rien(monkeypatch):
+    from extended_heuristic_search import coeurs_latence
+    monkeypatch.delenv("MKAN_LATENCY_CORES", raising=False)
+    avant = os.sched_getaffinity(0) if hasattr(os, "sched_getaffinity") else None
+    with coeurs_latence():
+        pendant = os.sched_getaffinity(0) if avant is not None else None
+    assert pendant == avant

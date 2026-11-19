@@ -1,0 +1,17 @@
+[
+ {
+  "label": "GRU traite fasterkan/fasterkan/dog (meilleure de recherche_v2, accord de Miguel du 16/11)",
+  "cell_type": "gru",
+  "regime": "traite",
+  "base_by_gate": {
+   "Forget": "fasterkan",
+   "Input": "fasterkan",
+   "Candidate": "wavkan_dog"
+  },
+  "gate_kwargs_by_gate": {
+   "Forget": {"M": 8, "h": 0.48828800373163156},
+   "Input": {"M": 4, "h": 0.05},
+   "Candidate": {"wavelet": "dog", "n_wavelets": 8}
+  }
+ }
+]

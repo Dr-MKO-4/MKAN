@@ -61,7 +61,10 @@ def _now() -> str:
 
 
 def _write_json(path: str, obj) -> None:
-    tmp = path + ".tmp"
+    # Fichier temporaire propre au processus (13/11) : avec les files paralleles, deux planificateurs ecrivent
+    # le meme fichier (scheduler_state.json, rapports) ; avec un .tmp commun, l'un deplacait le fichier de l'autre
+    # (FileNotFoundError, multkan arrete le 13/11 a 19:35).
+    tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, indent=1, ensure_ascii=False)
     os.replace(tmp, path)
@@ -189,8 +192,12 @@ class Pool:
 
 
 def latency_pass(out_dir: str):
-    """Mesure isolee : appelee seulement quand aucun entrainement ne tourne."""
+    """Mesure isolee : appelee seulement quand aucun entrainement ne tourne.
+    MKAN_LATENCE_DIFFEREE=1 (chaine en files paralleles) : d'autres etapes tournent encore, la mesure serait
+    faussee ; elle est faite une seule fois en fin de chaine, machine au repos."""
     from report import write_reports
+    if os.environ.get("MKAN_LATENCE_DIFFEREE") == "1":
+        return write_reports(out_dir)
     subprocess.run([sys.executable, os.path.join(_CAMPAGNE_DIR, "measure_latency.py"),
                     "--out_dir", out_dir], check=False)
     return write_reports(out_dir)
@@ -211,6 +218,8 @@ def specs_for(phase, archs, regime, seeds, protocol, preproc="B", drop=(), extra
         W = config.CELL_THETA[a["cell_type"]]["W"]
         path, input_size = _dataset(regime, W, protocol["n_windows_train"] or None, preproc, drop)
         extras = dict(extras_par_arch(a, input_size)) if extras_par_arch else {}
+        if a.get("gate_kwargs_by_gate"):      # 16/11 : reglages de base par porte (absent ailleurs : run_id inchanges)
+            extras["gate_kwargs_by_gate"] = a["gate_kwargs_by_gate"]
         if preproc != "B":
             extras["preproc"] = preproc
         if drop:
@@ -321,6 +330,15 @@ def run_experience(pool: Pool, nom: str, finalists_path: str, variante: str = No
         tous = [a for archs in par_regime.values() for a in archs]
         cible = next((a for a in tous if a.get("raccourci")), tous[0])
         drop = SOLDES[variante or "emetteur"]
+        # Garde-fou (audit du 12/11) : en regime traite, aucune colonne de solde brute n'est en entree ; le retrait
+        # ne changeait rien et les runs du 08-09/11 ont reentraine le meme modele. Refuser un retrait sans effet.
+        from niveau1_harness import PROCESSED_FEATURE_COLS, RAW_NUMERIC_COLS
+        presentes = PROCESSED_FEATURE_COLS if cible["regime"] == "traite" else RAW_NUMERIC_COLS
+        absentes = [c for c in drop if c not in presentes]
+        if absentes:
+            raise SystemExit(f"raccourci : colonnes absentes du regime {cible['regime']} : {absentes}. "
+                             f"Choisir un finaliste du regime brut (\"raccourci\": true dans finalistes.json) "
+                             f"ou retirer les variables derivees des soldes.")
         pool.run_phase(f"exp_raccourci_{variante or 'emetteur'}",
                        specs_for(f"exp_raccourci_{variante or 'emetteur'}", [cible], cible["regime"],
                                  seeds, p, drop=drop))
@@ -353,8 +371,12 @@ def run_derive(workers, threads, finalists_path: str, drift_path: str):
                 subprocess.run([sys.executable, os.path.join(_CAMPAGNE_DIR, "derive.py"), "preparer",
                                 "--drift_path", drift_path, "--data_dir", path], check=True)
             for seed in p["seeds"]:
+                # 18/11 : memes extras que specs_for (reglages de base par porte de la GRU FasterKAN), sinon le
+                # run_id recalcule ne retrouve pas son run final.
+                extras = ({"gate_kwargs_by_gate": arch["gate_kwargs_by_gate"]}
+                          if arch.get("gate_kwargs_by_gate") else None)
                 fin = make_spec("final", arch["cell_type"], regime, arch["base_by_gate"], seed, p, path,
-                                input_size)
+                                input_size, extras)
                 run_final = os.path.join(config.OUT_DIR, "runs", fin["run_id"])
                 if not os.path.exists(os.path.join(run_final, "DONE")):
                     print(f"  [derive] run final absent : {fin['label']}", flush=True)

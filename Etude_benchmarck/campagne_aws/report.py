@@ -94,7 +94,7 @@ def rank(rows: list, phases=None) -> list:
 
 def write_reports(out_dir: str = config.OUT_DIR) -> dict:
     rows = collect(out_dir)
-    tmp = os.path.join(out_dir, "runs.csv.tmp")
+    tmp = os.path.join(out_dir, f"runs.csv.{os.getpid()}.tmp")   # propre au processus (files paralleles, 13/11)
     with open(tmp, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction="ignore")
         w.writeheader()
@@ -104,7 +104,7 @@ def write_reports(out_dir: str = config.OUT_DIR) -> dict:
     summary = {"updated": datetime.now(timezone.utc).isoformat(), "n_runs_done": len(rows),
                "latency_threshold_ms": config.LATENCY_THRESHOLD_MS,
                "ranking": rank(rows)}
-    tmp = os.path.join(out_dir, "summary.json.tmp")
+    tmp = os.path.join(out_dir, f"summary.json.{os.getpid()}.tmp")   # propre au processus (files paralleles, 13/11)
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=1, ensure_ascii=False)
     os.replace(tmp, os.path.join(out_dir, "summary.json"))

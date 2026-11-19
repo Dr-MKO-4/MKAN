@@ -63,9 +63,11 @@ from extended_heuristic_search import (               # noqa: E402
     BASE_PARAM_SPACE, GATE_CANDIDATES, GATE_NAMES_TKAN, GATE_NAMES_GRU,
     THETA_OPT_SPACE, CONTINUOUS_THETA_OPT, CELL_TYPES, INPUT_REGIMES,
     validate_individual, compute_fitness,
+    build_model_from_individual, _measure_latency_ms, _REGIME_TO_NIVEAU1, coeurs_latence,
 )
 
 SENTINEL = -9999.0
+SOBOL_START_INDEX = 1_000_000   # indices de Sobol dans le point de reprise, distincts de ceux de Morris (0..)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -203,6 +205,10 @@ class HierarchicalSensitivityAnalyzer:
         enable_latency_penalty: bool = True,
         train_path: Optional[str] = None,
         val_path: Optional[str] = None,
+        latency_threshold_ms: float = 100.0,
+        latency_penalty_capped: bool = False,
+        r2_threshold: float = 0.99,
+        grid_init: str = "legacy",
     ) -> None:
         self.df_train = df_train
         self.df_val = df_val
@@ -226,6 +232,12 @@ class HierarchicalSensitivityAnalyzer:
         # contrairement à un patch de fonction globale, invisible des process
         # enfants qui ré-importent le module frais.
         self.enable_latency_penalty = enable_latency_penalty
+        # Seuil et forme de la penalite (13/11), comme pour la recherche : defaut = Etape 4 du 21/10 (100 ms,
+        # quadratique) ; la campagne AWS passe config.LATENCY_THRESHOLD_MS et la forme plafonnee (decision du 03/11).
+        self.latency_threshold_ms = float(latency_threshold_ms)
+        self.latency_penalty_capped = bool(latency_penalty_capped)
+        self.r2_threshold = float(r2_threshold)
+        self.grid_init = grid_init
 
         default_scratch = "/workspace/scratch"
         if scratch_dir is None:
@@ -516,7 +528,67 @@ class HierarchicalSensitivityAnalyzer:
 
     # ── Évaluation d'un individu (section 17 : robustesse) ───────────────────
 
-    def _evaluate_individual(self, individual: dict, evaluation_id: int) -> float:
+    def _latences_cache(self) -> dict:
+        """Latences deja pre-mesurees (latences_premesurees.json) : une reprise apres coupure spot ne les
+        remesure pas (15/11 : la pre-mesure des 1050 individus prenait ~1 h et etait refaite a chaque coupure)."""
+        chemin = os.path.join(self.scratch_dir, "latences_premesurees.json")
+        try:
+            with open(chemin, encoding="utf-8") as f:
+                return {int(k): float(v) for k, v in json.load(f).items()}
+        except (OSError, ValueError):
+            return {}
+
+    def _latences_sauver(self, lat: dict) -> None:
+        chemin = os.path.join(self.scratch_dir, "latences_premesurees.json")
+        tmp = f"{chemin}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({str(k): v for k, v in sorted(lat.items())}, f)
+        os.replace(tmp, chemin)
+
+    def _premesurer_latences(self, pending: list):
+        """Latence de chaque individu en attente, mesuree dans le processus principal, seule sur les coeurs
+        reserves (MKAN_LATENCY_CORES) avec MKAN_LATENCY_THREADS fils, comme la pre-mesure de NSGA-II (13/11,
+        accord de Miguel). Sans penalite appliquee : rien a mesurer (la latence reste mesuree dans compute_fitness
+        pour la trace). Un echec retombe sur la mesure de compute_fitness. Generateur : rend (eval_id, x, latence)
+        des que la latence est connue, pour que les entrainements demarrent sans attendre toute la pre-mesure ;
+        les latences sont gardees dans latences_premesurees.json (reprise)."""
+        actif = self.enable_latency_penalty and bool(os.environ.get("MKAN_LATENCY_CORES"))
+        cache = self._latences_cache() if actif else {}
+        a_mesurer = [(i, x) for i, x in pending if i not in cache] if actif else []
+        for i, x in pending:
+            if i in cache or not actif:
+                yield i, x, cache.get(i)
+        if not a_mesurer:
+            return
+        import torch
+        from niveau1_harness import PROCESSED_FEATURE_COLS, RAW_NUMERIC_COLS, ACTION_ONEHOT_COLS
+        n_feat = {"brut": len(RAW_NUMERIC_COLS) + len(ACTION_ONEHOT_COLS), "traite": len(PROCESSED_FEATURE_COLS)}
+        fils = int(os.environ.get("MKAN_LATENCY_THREADS") or torch.get_num_threads())
+        for n, (eval_id, x_row) in enumerate(a_mesurer, 1):
+            lat = None
+            avant = torch.get_num_threads()
+            with coeurs_latence():
+                torch.set_num_threads(fils)
+                try:
+                    ind = self.decode_config(x_row)
+                    if validate_individual(ind):
+                        input_size = n_feat[_REGIME_TO_NIVEAU1[ind["Input_Regime"]]]
+                        model = build_model_from_individual(ind, input_size)
+                        lat = _measure_latency_ms(model, int(ind["W"]), input_size)
+                        del model
+                except Exception:   # noqa: BLE001
+                    lat = None
+                finally:
+                    torch.set_num_threads(avant)
+            if lat is not None:
+                cache[eval_id] = lat
+                if n % 10 == 0 or n == len(a_mesurer):
+                    self._latences_sauver(cache)
+            yield eval_id, x_row, lat
+        self._latences_sauver(cache)
+
+    def _evaluate_individual(self, individual: dict, evaluation_id: int,
+                             latency_ms_override: Optional[float] = None) -> float:
         try:
             if not validate_individual(individual):
                 raise ValueError("individu invalide (validate_individual)")
@@ -530,6 +602,11 @@ class HierarchicalSensitivityAnalyzer:
                                      n_windows_eval=self.n_windows_eval,
                                      n_epochs_eval=self.n_epochs_eval, seed=self.seed,
                                      enable_latency_penalty=self.enable_latency_penalty,
+                                     latency_threshold_ms=getattr(self, "latency_threshold_ms", 100.0),
+                                     latency_penalty_capped=getattr(self, "latency_penalty_capped", False),
+                                     r2_threshold=getattr(self, "r2_threshold", 0.99),
+                                     grid_init=getattr(self, "grid_init", "legacy"),
+                                     latency_ms_override=latency_ms_override,
                                      window_cache=self._window_cache,
                                      regime_cache=self._regime_cache)
             if result["fitness_total"] is None:
@@ -583,22 +660,46 @@ class HierarchicalSensitivityAnalyzer:
         if n_already_done:
             pbar.write(f"  ({n_already_done} évaluation(s) déjà disponibles depuis un run précédent  reprises)")
 
+        # 15/11 : point de reprise apres CHAQUE evaluation (avant : toutes les 50 ; avec 10 processus et des
+        # coupures spot toutes les ~2 h, une coupure perdait jusqu'a 49 entrainements). Fichier de ~1600 lignes.
+        checkpoint_every = 1
         if self.max_workers > 1:
+            # Processus crees par copie (fork) : les donnees restent partagees (en spawn, chaque processus les
+            # recharge, ~15 Go chacun : memoire depassee a 18 processus le 15/11). Le processus principal doit
+            # alors tourner sans fils de calcul (OMP_NUM_THREADS=1, OPENBLAS_NUM_THREADS=1) : copie apres un calcul
+            # multi-fils, les processus restaient figes dans torch sur un verrou herite (15/11, 30 sur 30).
             with ProcessPoolExecutor(max_workers=self.max_workers,
                                      initializer=_init_worker,
                                      initargs=(self,)) as pool:
-                futures = {pool.submit(_worker_evaluate, item): item[0] for item in pending}
-                for fut in as_completed(futures):
-                    eval_id, fitness = fut.result()
-                    results[eval_id] = fitness
-                    pbar.update(1)
-                    pbar.set_postfix({"dernier": f"{fitness:.4f}"})
-                    if len(results) % checkpoint_every == 0:
-                        self._append_checkpoint(results)
-                        results = {}
+                # Tous les processus sont crees ICI, avant la premiere mesure de latence : un processus cree
+                # (fork) pendant que le processus principal mesure avec ses fils de calcul restait bloque sur un
+                # verrou herite (constate le 15/11 : 29 processus sur 30 figes). Meme moment de creation
+                # qu'avant le correctif (processus crees alors que le principal ne calcule pas).
+                list(pool.map(_attendre, [1.0] * self.max_workers))
+                futures = {}
+
+                def recolter(bloquant: bool) -> None:
+                    nonlocal results
+                    prets = list(as_completed(futures)) if bloquant else [f for f in futures if f.done()]
+                    for fut in prets:
+                        futures.pop(fut, None)
+                        eval_id, fitness = fut.result()
+                        results[eval_id] = fitness
+                        pbar.update(1)
+                        pbar.set_postfix({"dernier": f"{fitness:.4f}"})
+                        if len(results) % checkpoint_every == 0:
+                            self._append_checkpoint(results)
+                            results = {}
+
+                # Les entrainements partent des que la latence de l'individu est connue (deja en cache ou
+                # mesuree a l'instant sur les coeurs reserves) ; les resultats sont recoltes au fil de l'eau.
+                for i, x, lat_i in self._premesurer_latences(pending):
+                    futures[pool.submit(_worker_evaluate, (i, x, lat_i))] = i
+                    recolter(bloquant=False)
+                recolter(bloquant=True)
         else:
-            for eval_id, x_row in pending:
-                fitness = self._evaluate_individual(self.decode_config(x_row), eval_id)
+            for eval_id, x_row, lat_i in self._premesurer_latences(pending):
+                fitness = self._evaluate_individual(self.decode_config(x_row), eval_id, lat_i)
                 results[eval_id] = fitness
                 pbar.update(1)
                 pbar.set_postfix({"dernier": f"{fitness:.4f}"})
@@ -665,6 +766,9 @@ class HierarchicalSensitivityAnalyzer:
         problem = self._problem()
         X = morris_sample.sample(problem, N=r, num_levels=num_levels, seed=seed)
         Y = self._evaluate_batch(X, start_index=0, desc="Morris")
+        # Sorties brutes (13/11, demande de la session memoire) : echantillons et fitness, pour recalculer.
+        np.save(os.path.join(self.scratch_dir, "morris_X.npy"), X)
+        np.save(os.path.join(self.scratch_dir, "morris_Y.npy"), Y)
 
         Si = morris_analyze.analyze(problem, X, Y, num_levels=num_levels, seed=seed)
 
@@ -752,7 +856,12 @@ class HierarchicalSensitivityAnalyzer:
         for name, val in fixed.items():
             X_full[:, idx_full[name]] = val
 
-        Y = self._evaluate_batch(X_full, start_index=0, desc="Sobol")
+        # Indices propres a Sobol (13/11) : avec start_index=0, Sobol partageait les indices 0.. de Morris dans le
+        # meme point de reprise et reprenait les fitness de Morris comme ses propres premieres evaluations.
+        Y = self._evaluate_batch(X_full, start_index=SOBOL_START_INDEX, desc="Sobol")
+        np.save(os.path.join(self.scratch_dir, "sobol_X.npy"), X_full)
+        np.save(os.path.join(self.scratch_dir, "sobol_X_reduit.npy"), X_reduced)
+        np.save(os.path.join(self.scratch_dir, "sobol_Y.npy"), Y)
         masks = np.array([self.mask_active(X_full[i]) for i in range(X_full.shape[0])])
 
         Si = sobol_analyze.analyze(problem, Y, calc_second_order=calc_second_order, seed=seed)
@@ -1095,7 +1204,10 @@ def _init_worker(analyzer: HierarchicalSensitivityAnalyzer) -> None:
     # Réglage par défaut du processus (cœurs physiques) partagé entre les
     # workers, plutôt que 1 thread : la latence mesurée dans compute_fitness
     # reste plus proche des conditions de la recherche.
-    torch.set_num_threads(max(1, torch.get_num_threads() // max(1, analyzer.max_workers)))
+    # MKAN_SENSI_FILS (15/11) : fils par processus fixes explicitement ; le processus principal tourne alors
+    # sur 1 fil (fork sans verrou herite) et la memoire limite le nombre de processus (~15 Go chacun).
+    fils = os.environ.get("MKAN_SENSI_FILS")
+    torch.set_num_threads(int(fils) if fils else max(1, torch.get_num_threads() // max(1, analyzer.max_workers)))
     # df_train/df_val ont ete exclues du pickle (__getstate__) : chaque worker
     # les recharge depuis le disque une seule fois, a l'initialisation.
     analyzer._ensure_dataframes_loaded()
@@ -1103,8 +1215,15 @@ def _init_worker(analyzer: HierarchicalSensitivityAnalyzer) -> None:
     _WORKER_ANALYZER = analyzer
 
 
+def _attendre(secondes: float) -> int:
+    """Tache vide : force la creation de tous les processus du pool avant la pre-mesure des latences."""
+    time.sleep(secondes)
+    return os.getpid()
+
+
 def _worker_evaluate(item) -> "tuple[int, float]":
-    eval_id, x_row = item
+    eval_id, x_row = item[0], item[1]
+    latence = item[2] if len(item) > 2 else None        # pre-mesuree sur coeurs reserves (13/11)
     individual = _WORKER_ANALYZER.decode_config(x_row)
-    fitness = _WORKER_ANALYZER._evaluate_individual(individual, eval_id)
+    fitness = _WORKER_ANALYZER._evaluate_individual(individual, eval_id, latence)
     return eval_id, fitness

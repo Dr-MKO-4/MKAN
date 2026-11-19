@@ -70,7 +70,16 @@ def build_model(spec: dict, input_size: int) -> torch.nn.Module:
     from lstm_cell import ConfigurableMKANScorer
     from gru_cell import GRUMKANScorer
     gate_bases, gate_kwargs = _build_gate_bases(spec["cell_type"], spec["base_by_gate"])
-    cls = ConfigurableMKANScorer if spec["cell_type"] == "lstm" else GRUMKANScorer
+    # Reglages de base par porte (16/11, GRU FasterKAN de recherche_v2) : {porte canonique: kwargs}, appliques
+    # par-dessus CANDIDATE_KWARGS. Absent pour tous les autres runs (construction inchangee).
+    for gate_canon, kw in (spec.get("gate_kwargs_by_gate") or {}).items():
+        from niveau1_benchmark_run import GATE_TO_NIVEAU1_KEY
+        from niveau1_harness import GRU_GATE_MAP
+        cle = GATE_TO_NIVEAU1_KEY[gate_canon]
+        cle = GRU_GATE_MAP.get(cle) if spec["cell_type"] == "gru" else cle
+        if cle is not None:
+            gate_kwargs[cle] = {**gate_kwargs.get(cle, {}), **kw}
+    cls =ConfigurableMKANScorer if spec["cell_type"] == "lstm" else GRUMKANScorer
     mult = spec.get("mult_pairs")      # {porte: {j: [i1, i2]}}, cles en texte dans le JSON
     mult = {g: {int(j): tuple(p) for j, p in d.items()} for g, d in mult.items()} if mult else None
     return cls(input_size, spec["hidden_size"], gate_bases=gate_bases,

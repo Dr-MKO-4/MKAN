@@ -21,6 +21,7 @@ import json
 import os
 import signal
 import sys
+import time
 
 _CAMPAGNE_DIR = os.path.dirname(os.path.abspath(__file__))
 if _CAMPAGNE_DIR not in sys.path:
@@ -113,15 +114,36 @@ def preparer(a):
     print(f"[derive] {sum(r['derive'] for r in reg)} variables en derive -> {out}", flush=True)
 
 
-def _scores(model, X, lot=4096) -> np.ndarray:
+class Interrompu(Exception):
+    """Preavis spot ou STOP pendant l'evaluation : les scores deja calcules sont gardes sur disque."""
+
+
+def _scores(model, X, lot=4096, cache=None, stop=None) -> np.ndarray:
+    """Scores par lots de 4096. Avec cache : point de reprise toutes les ~10 min (scores deja calcules), car
+    l'evaluation d'une LSTM sur D_ref (1,3 a 1,9 million de fenetres) prend plus longtemps que l'intervalle entre
+    deux interruptions spot. Les scores ne dependent pas du decoupage : reprendre donne le meme tableau."""
+    morceaux, debut = [], 0
+    if cache and os.path.exists(cache):
+        fait = np.load(cache)
+        morceaux, debut = [fait], len(fait)
+    dernier = time.monotonic()
     with torch.no_grad():
-        return np.concatenate([model(torch.from_numpy(np.asarray(X[s:s + lot]))).numpy()
-                               for s in range(0, len(X), lot)])
+        for s in range(debut, len(X), lot):
+            morceaux.append(model(torch.from_numpy(np.asarray(X[s:s + lot]))).numpy())
+            arreter = bool(stop and stop())
+            if cache and (arreter or time.monotonic() - dernier >= 600):
+                tmp = cache + ".tmp.npy"
+                np.save(tmp, np.concatenate(morceaux))
+                os.replace(tmp, cache)
+                dernier = time.monotonic()
+            if arreter:
+                raise Interrompu
+    return np.concatenate(morceaux) if morceaux else np.zeros(0, dtype=np.float32)
 
 
-def _mesures(model, X, y, scenario, cible: str) -> dict:
+def _mesures(model, X, y, scenario, cible: str, cache=None, stop=None) -> dict:
     from niveau1_harness import compute_metrics
-    s = np.nan_to_num(_scores(model, X), nan=0.5).clip(0.0, 1.0)
+    s = np.nan_to_num(_scores(model, X, cache=cache, stop=stop), nan=0.5).clip(0.0, 1.0)
     m = compute_metrics(np.asarray(y), s)
     res = {k: m.get(k) for k in ("mcc", "auc_pr", "brier")}
     if scenario is not None:
@@ -163,19 +185,35 @@ def lancer(a):
         n, n_lots = len(X_ad), int(np.ceil(len(X_ad) / bs))
         chemin = os.path.join(a.out_dir, "checkpoint.pt")
         st = dict(epoch=0, wait=0, best=float("inf"), best_model=None)
+        reprise = None                   # (permutation, premier lot) d'une epoque commencee
         if os.path.exists(chemin):
             ck = torch.load(chemin, map_location="cpu", weights_only=False)
             model.load_state_dict(ck["model"])
             opt.load_state_dict(ck["opt"])
             gen.set_state(ck["gen"])
             st = ck["st"]
+            if ck.get("perm") is not None:
+                reprise = (ck["perm"], ck["lot"])
         arret = {"f": False}
         signal.signal(signal.SIGTERM, lambda *_: arret.update(f=True))
         stop = lambda: arret["f"] or os.path.exists(config.STOP_FILE)    # noqa: E731
+
+        def sauver(perm=None, lot=None):
+            # Point de reprise. En cours d'epoque, on garde aussi la permutation et le lot suivant : la reprise
+            # refait exactement la meme suite de lots (le generateur est deja passe apres randperm).
+            _atomic_torch_save({"model": model.state_dict(), "opt": opt.state_dict(), "gen": gen.get_state(),
+                                "st": st, "perm": perm, "lot": lot}, chemin)
+
+        PERIODE_S = 600                  # point de reprise en cours d'epoque toutes les 10 min
         while st["wait"] < spec["patience"] and st["epoch"] < spec["max_epochs"]:
             model.train()
-            perm = torch.randperm(n, generator=gen).numpy()
-            for b in range(n_lots):      # une epoque interrompue est refaite (point de reprise par epoque)
+            if reprise is not None:
+                perm, debut = reprise
+                reprise = None
+            else:
+                perm, debut = torch.randperm(n, generator=gen).numpy(), 0
+            dernier = time.monotonic()
+            for b in range(debut, n_lots):
                 idx = np.sort(perm[b * bs:(b + 1) * bs])
                 perte, _, _, _ = mkan_total_loss(model, torch.from_numpy(np.asarray(X_ad[idx])),
                                                  torch.from_numpy(np.asarray(y_ad[idx])), lam=spec["lam"],
@@ -184,8 +222,13 @@ def lancer(a):
                 perte.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=spec["clip_grad_norm"])
                 opt.step()
-                if b % 500 == 0 and stop():
-                    return EXIT_INTERRUPTED
+                if b % 500 == 0:
+                    if stop():
+                        sauver(perm, b + 1)      # preavis spot : on garde l'epoque commencee
+                        return EXIT_INTERRUPTED
+                    if time.monotonic() - dernier >= PERIODE_S:
+                        sauver(perm, b + 1)
+                        dernier = time.monotonic()
             model.eval()
             with torch.no_grad():
                 suivi = float(np.mean([float(weighted_bce(model(torch.from_numpy(X_su[s:s + 4096])),
@@ -196,20 +239,30 @@ def lancer(a):
                 st.update(best=suivi, wait=0, best_model={k: v.clone() for k, v in model.state_dict().items()})
             else:
                 st["wait"] += 1
-            _atomic_torch_save({"model": model.state_dict(), "opt": opt.state_dict(),
-                                "gen": gen.get_state(), "st": st}, chemin)
+            sauver()                     # fin d'epoque : pas d'epoque en cours
             if stop():
                 return EXIT_INTERRUPTED
         if st["best_model"] is not None:
             model.load_state_dict(st["best_model"])
     model.eval()
+    # Evaluation : plus de threads si le planificateur en donne (MKAN_EVAL_THREADS, comme train_run.py), et
+    # points de reprise (scores_*.npy) : avant, une interruption la faisait recommencer en entier.
+    torch.set_num_threads(int(os.environ.get("MKAN_EVAL_THREADS") or a.threads))
+    arret = {"f": False}
+    signal.signal(signal.SIGTERM, lambda *_: arret.update(f=True))
+    stop = lambda: arret["f"] or os.path.exists(config.STOP_FILE)    # noqa: E731
     X_val = np.load(os.path.join(data_dir, "X_val.npy"), mmap_mode="r")
     y_val = np.load(os.path.join(data_dir, "y_val.npy"), mmap_mode="r")
     ref = np.load(os.path.join(der, "ref_idx.npy"))
+    try:
+        d_eval = _mesures(model, charge("X_eval"), charge("y_eval"), np.asarray(charge("scenario_eval")), a.cible,
+                          cache=os.path.join(a.out_dir, "scores_eval.npy"), stop=stop)
+        d_ref = _mesures(model, X_val[ref], y_val[ref], None, a.cible,
+                         cache=os.path.join(a.out_dir, "scores_ref.npy"), stop=stop)
+    except Interrompu:
+        return EXIT_INTERRUPTED
     res = {"bras": a.bras, "seed": spec["seed"], "run_final": spec["run_id"], "label": spec["label"],
-           "regions": regions,
-           "D_eval": _mesures(model, charge("X_eval"), charge("y_eval"), np.asarray(charge("scenario_eval")), a.cible),
-           "D_ref": _mesures(model, X_val[ref], y_val[ref], None, a.cible)}
+           "regions": regions, "D_eval": d_eval, "D_ref": d_ref}
     _write_json(os.path.join(a.out_dir, "resultat.json"), res)
     torch.save({"state_dict": model.state_dict(), "spec": spec, "bras": a.bras},
                os.path.join(a.out_dir, "model.pt"))

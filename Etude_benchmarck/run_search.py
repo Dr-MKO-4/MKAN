@@ -128,6 +128,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                         "Désactivée par défaut dans ce script (recherche sur GPU M4, hors "
                         "contrainte USSD CPU de production) ; la latence reste toujours "
                         "mesurée/journalisée.")
+    p.add_argument("--latency-threshold-ms", dest="latency_threshold_ms", type=float, default=100.0,
+                   help="Seuil de latence (ms) de la contrainte de dominance ET de la pénalité (100 : Étape 4 du "
+                        "21/10 ; la campagne AWS passe config.LATENCY_THRESHOLD_MS = 500, décision du 03/11).")
+    p.add_argument("--latency-penalty-capped", dest="latency_penalty_capped", action="store_true", default=False,
+                   help="Pénalité min(1, (L-T)/T) (décision du 03/11) au lieu de 10((L-T)/T)^2 non bornée.")
+    p.add_argument("--r2-threshold", dest="r2_threshold", type=float, default=0.99,
+                   help="Seuil du R² symbolique de la fitness (0,99 : Étape 4 du 21/10 ; la campagne AWS passe "
+                        "config.R2_ALT = 0,80, décisions des 27/10 et 06/11). Le R² à 0,99 reste journalisé.")
+    p.add_argument("--grid-init", dest="grid_init", choices=["legacy", "data"], default="legacy",
+                   help="Grille des bases : legacy = [-1, 1] (Étape 4 du 21/10) ; data = recalée sur les données "
+                        "(décision du 03/11, config.GRID_INIT).")
     p.add_argument("--no-latency-constraint", dest="enforce_latency_constraint",
                    action="store_false", default=True,
                    help="Désactive la CONTRAINTE de latence dans la sélection NSGA-II "
@@ -243,6 +254,9 @@ def _run_sensitivity_analysis(args, search, df_train, df_val) -> None:
         # parallèle, contrairement à un monkeypatch de fonction module-level qui
         # ne serait pas vu par des processus enfants réimportant le module).
         enable_latency_penalty=args.enable_latency_penalty,
+        latency_threshold_ms=args.latency_threshold_ms,
+        latency_penalty_capped=args.latency_penalty_capped,
+        r2_threshold=args.r2_threshold, grid_init=args.grid_init,
     )
     d = analyzer.dimension
     n_morris = args.sensitivity_r * (d + 1)
@@ -281,7 +295,10 @@ def main(argv=None) -> int:
 
     # Réglage d'origine, conservé pour mesurer la latence dans les mêmes
     # conditions qu'en séquentiel (ExtendedHeuristicSearch._premeasure_latencies).
-    latency_num_threads = torch.get_num_threads()
+    # MKAN_LATENCY_THREADS (decision du 03/11 : 4 fils, comme measure_latency.py) ; sinon le reglage d'origine
+    # du processus (Etape 4 du 21/10). La chaine fixe OMP_NUM_THREADS=1 : sans cette variable, la pre-mesure
+    # se faisait a 1 fil (ecart releve par la session memoire le 13/11).
+    latency_num_threads = int(os.environ.get("MKAN_LATENCY_THREADS") or torch.get_num_threads())
     if device.type == "cpu" and args.eval_workers > 1:
         # self.n_workers individus s'entraînent en même temps (threads, cf.
         # _evaluer_generation) : on divise le pool de threads torch (sinon
@@ -301,10 +318,14 @@ def main(argv=None) -> int:
         enforce_latency_constraint=args.enforce_latency_constraint,
         enable_latency_penalty=args.enable_latency_penalty,
         latency_num_threads=latency_num_threads,
+        latency_threshold_ms=args.latency_threshold_ms,
+        latency_penalty_capped=args.latency_penalty_capped,
+        r2_threshold=args.r2_threshold, grid_init=args.grid_init,
     )
     print(f"Sorties écrites dans : {search.scratch_dir}")
     print(f"Sélection NSGA-II : contrainte de latence "
-         f"{'ACTIVÉE (100 ms)' if args.enforce_latency_constraint else 'DÉSACTIVÉE (4 objectifs libres)'}")
+         f"{'ACTIVÉE (%g ms)' % args.latency_threshold_ms if args.enforce_latency_constraint else 'DÉSACTIVÉE (4 objectifs libres)'}"
+         f" ; pénalité {'%s, seuil %g ms' % ('plafonnée' if args.latency_penalty_capped else 'quadratique', args.latency_threshold_ms) if args.enable_latency_penalty else 'non appliquée'}")
     print(f"Pénalité de latence dans la fitness_total (départage AHP) : "
          f"{'ACTIVÉE (protocole intégral)' if args.enable_latency_penalty else 'DÉSACTIVÉE (mesurée/journalisée quand même)'}")
 

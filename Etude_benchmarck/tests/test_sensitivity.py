@@ -251,6 +251,26 @@ class TestMorrisSobolReport:
                 assert key in r
                 assert not math.isnan(r[key])
 
+    def test_sobol_ne_reprend_pas_les_evaluations_de_morris(self, analyzer, monkeypatch):
+        """13/11 : Morris puis Sobol dans le meme dossier ; Sobol doit evaluer tous ses echantillons (indices
+        propres), et les sorties brutes (X, Y) ainsi que les intervalles de confiance doivent etre enregistres."""
+        appels = {"n": 0}
+        base = _mock_fitness_factory()
+
+        def compte(*a, **k):
+            appels["n"] += 1
+            return base(*a, **k)
+        monkeypatch.setattr(sa, "compute_fitness", compte)
+        analyzer.run_morris(r=2, num_levels=4, seed=42)
+        n_morris = appels["n"]
+        reduced = ["lr", "hidden_size", "lam"]
+        payload = analyzer.run_sobol(N=4, calc_second_order=False, seed=42, reduced_names=reduced)
+        assert appels["n"] - n_morris == 4 * (len(reduced) + 2)       # aucune evaluation de Morris reprise
+        for nom in ("morris_X.npy", "morris_Y.npy", "sobol_X.npy", "sobol_Y.npy"):
+            assert os.path.exists(os.path.join(analyzer.scratch_dir, nom)), nom
+        for r in payload["results"]:
+            assert r["S_i_conf_95"] is not None and r["S_Ti_conf_95"] is not None
+
     def test_sobol_reduced_space_and_ranking(self, analyzer, monkeypatch):
         monkeypatch.setattr(sa, "compute_fitness", _mock_fitness_factory())
         reduced = ["lr", "hidden_size", "lam"]
@@ -323,3 +343,23 @@ class TestCheckpointAndErrors:
             record = json.loads(f.readline())
         assert record["evaluation_id"] == 999
         assert "RuntimeError" in record["error_type"]
+
+
+def test_latences_premesurees_gardees_pour_la_reprise(analyzer, monkeypatch):
+    """15/11 : une reprise apres coupure ne remesure pas les latences deja connues (latences_premesurees.json)."""
+    import contextlib
+    appels = []
+    monkeypatch.setenv("MKAN_LATENCY_CORES", "0")
+    monkeypatch.setattr(sa, "coeurs_latence", contextlib.nullcontext)
+    monkeypatch.setattr(sa, "validate_individual", lambda ind: True)
+    monkeypatch.setattr(sa, "build_model_from_individual", lambda ind, n: object())
+    monkeypatch.setattr(sa, "_measure_latency_ms", lambda m, w, n: appels.append(1) or 123.0)
+    analyzer.enable_latency_penalty = True
+    X = np.random.default_rng(1).uniform(0, 1, (4, analyzer.dimension))
+    pending = [(1_000_000 + i, X[i]) for i in range(4)]
+    premier = list(analyzer._premesurer_latences(pending))
+    assert len(appels) == 4 and all(lat == 123.0 for _, _, lat in premier)
+    second = list(analyzer._premesurer_latences(pending))
+    assert len(appels) == 4                      # rien de remesure
+    assert sorted(i for i, _, _ in second) == [i for i, _ in pending]
+    assert all(lat == 123.0 for _, _, lat in second)

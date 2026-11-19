@@ -76,9 +76,11 @@ def fenetres(chemin: str, spec: dict, cache_df: dict, cache_fen: dict):
     if pre.get("preproc", "B") != "B" or pre.get("colonnes_retirees"):
         raise ValueError(f"{spec['label']} : seul le pretraitement B complet est prevu ici")
     if spec["regime"] not in cache_df:
-        if "brut" not in cache_df:
-            cache_df["brut"] = read_momtsim_parquet(chemin)     # jeu lu une fois
-        df, cols = build_regime_frame(cache_df["brut"], spec["regime"], "B", {})
+        # Cle a part pour le jeu lu (18/11) : sous "brut", il prenait la place des fenetres du regime brut
+        # (KeyError 'feat' au premier run brut apres un run traite).
+        if "_jeu" not in cache_df:
+            cache_df["_jeu"] = read_momtsim_parquet(chemin)     # jeu lu une fois
+        df, cols = build_regime_frame(cache_df["_jeu"], spec["regime"], "B", {})
         if cols != pre["feature_cols"]:
             raise ValueError(f"colonnes differentes du train pour le regime {spec['regime']}")
         standardize(df, cols, stats={c: (s["mean"], s["std"]) for c, s in pre["standardize_stats"].items()})

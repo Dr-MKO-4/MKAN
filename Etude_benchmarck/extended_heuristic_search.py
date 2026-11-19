@@ -524,6 +524,43 @@ def _safe_float(x, default=0.0) -> float:
     return x
 
 
+def _coeurs(spec: str) -> set:
+    """« 60-63 » ou « 60,61,62,63 » -> {60, 61, 62, 63}."""
+    out = set()
+    for part in spec.split(","):
+        a, _, b = part.strip().partition("-")
+        out.update(range(int(a), int(b or a) + 1))
+    return out
+
+
+class coeurs_latence:
+    """Mesure de latence sur des coeurs reserves (13/11, accord de Miguel) : la chaine confine tous les
+    entrainements a config.TRAIN_CORES et donne config.LATENCY_CORES via MKAN_LATENCY_CORES ; pendant la mesure,
+    TOUS les fils du processus passent sur ces coeurs (fils torch crees pendant la mesure compris), puis tous
+    reviennent aux coeurs d'origine. Sans MKAN_LATENCY_CORES (ou hors Linux) : aucun effet (Etape 4 du 21/10)."""
+
+    def __enter__(self):
+        spec = os.environ.get("MKAN_LATENCY_CORES")
+        self.origine = None
+        if spec and hasattr(os, "sched_setaffinity") and os.path.isdir("/proc/self/task"):
+            self.origine = os.sched_getaffinity(0)
+            self._tous(_coeurs(spec))
+        return self
+
+    def __exit__(self, *exc):
+        if self.origine is not None:
+            self._tous(self.origine)
+        return False
+
+    @staticmethod
+    def _tous(masque):
+        for tid in os.listdir("/proc/self/task"):
+            try:
+                os.sched_setaffinity(int(tid), masque)
+            except OSError:
+                pass
+
+
 def _measure_latency_ms(model: torch.nn.Module, W: int, input_size: int,
                          batch: int = 256, n_repeats: int = 3) -> float:
     """
@@ -896,6 +933,9 @@ def compute_fitness(
     rng_lock: Optional["threading.Lock"] = None,
     regime_cache: Optional[dict] = None,
     latency_ms_override: Optional[float] = None,
+    latency_threshold_ms: float = LATENCY_CONSTRAINT_MS,
+    latency_penalty_capped: bool = False,
+    grid_init: str = "legacy",
 ) -> dict:
     """
     Fitness scientifique de l'Étape 2 (section 3) :
@@ -997,6 +1037,15 @@ def compute_fitness(
         with rl:
             torch.manual_seed(seed)
             model = build_model_from_individual(config, input_size).to(device)
+        # Grille des bases recalee sur les donnees (decision du 03/11, defaut P3), comme campagne_aws/train_run.py :
+        # 100 000 valeurs x_t tirees des fenetres d'entrainement de l'individu (rng(7), comme prepare_data.py).
+        # grid_init="legacy" (defaut) garde [-1, 1] pour reproduire l'Etape 4 du 21/10.
+        n_grilles = 0
+        if grid_init == "data":
+            from edges import fit_grids_to_data
+            plat = X_tr.reshape(-1, X_tr.shape[-1])
+            g_idx = np.random.default_rng(7).choice(len(plat), min(100_000, len(plat)), replace=False)
+            n_grilles = fit_grids_to_data(model, torch.from_numpy(np.ascontiguousarray(plat[np.sort(g_idx)])).to(device))
 
         optimizer = DMLAdam(model.parameters(), lr=float(config["lr"]))
         batch_size = int(config["batch_size"])
@@ -1070,7 +1119,10 @@ def compute_fitness(
         # s'entraîneraient pendant le chronométrage et le gonfleraient.
         latency_ms = (latency_ms_override if latency_ms_override is not None
                       else _measure_latency_ms(model, W, input_size))
-        penalty_lat = _penalty_latency(latency_ms)
+        # Seuil et forme de la penalite passes par l'appelant (13/11) : par defaut l'Etape 4 du 21/10 (100 ms,
+        # quadratique) ; la campagne AWS passe config.LATENCY_THRESHOLD_MS (500 ms) et la forme plafonnee
+        # (decision du 2026-11-03).
+        penalty_lat = _penalty_latency(latency_ms, threshold_ms=latency_threshold_ms, capped=latency_penalty_capped)
 
         with torch.no_grad():
             n_audit = min(256, X_vl_t.shape[0])
@@ -1087,6 +1139,10 @@ def compute_fitness(
 
         r2_symbolic = _compute_r2_symbolic(model.to("cpu"), x_pool,
                                             theta=theta_prune, r2_threshold=r2_threshold)
+        # Trace du R2 au seuil 0,99 quand la fitness en utilise un autre (0,80 : decisions des 27/10 et 06/11),
+        # comme train_run.py journalise les deux seuils.
+        r2_symbolic_099 = (r2_symbolic if r2_threshold == 0.99 else
+                           _compute_r2_symbolic(model, x_pool, theta=theta_prune, r2_threshold=0.99))
         model.to(device)
 
         # penalty_lat est TOUJOURS mesurée/calculée (traçabilité, section 20) ; seule
@@ -1104,6 +1160,10 @@ def compute_fitness(
             "R2_symbolic": r2_symbolic,
             "latency_ms": latency_ms, "penalty_lat": penalty_lat,
             "penalty_lat_applied": enable_latency_penalty,
+            "latency_threshold_ms": latency_threshold_ms, "latency_penalty_capped": latency_penalty_capped,
+            "r2_threshold": r2_threshold, "R2_symbolic_0.99": r2_symbolic_099,
+            "latence_premesuree": latency_ms_override is not None,
+            "grid_init": grid_init, "grilles_recalees": n_grilles,
             "fitness_total": _safe_float(fitness_total, default=-10.0),
         }
         n_params = sum(p.numel() for p in model.parameters())
@@ -1185,6 +1245,10 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         enforce_latency_constraint: bool = True,
         enable_latency_penalty:     bool = True,
         latency_num_threads: Optional[int] = None,
+        latency_threshold_ms: float = LATENCY_CONSTRAINT_MS,
+        latency_penalty_capped: bool = False,
+        r2_threshold: float = 0.99,
+        grid_init: str = "legacy",
     ) -> None:
         # espace factice : satisfait la validation du parent (non vide),
         # jamais consulté par les méthodes redéfinies ci-dessous.
@@ -1218,6 +1282,14 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         # réglage d'origine du processus, avant sa division entre les threads
         # d'entraînement (cf. run_search.py, _premeasure_latencies).
         self.latency_num_threads = latency_num_threads
+        # Seuil de la contrainte de dominance ET de la penalite (une seule valeur, 13/11) : par defaut 100 ms
+        # (Etape 4 du 21/10) ; la campagne AWS passe config.LATENCY_THRESHOLD_MS (500 ms, decision du 03/11).
+        self.latency_threshold_ms = float(latency_threshold_ms)
+        self.latency_penalty_capped = bool(latency_penalty_capped)
+        # Seuil du R2 symbolique de la fitness (0,80 : decisions des 27/10 et 06/11 ; defaut 0,99 = Etape 4 du
+        # 21/10) et grille des bases ("data" : recalee, decision du 03/11 ; "legacy" : [-1, 1]).
+        self.r2_threshold = float(r2_threshold)
+        self.grid_init = grid_init
 
         default_scratch = "/workspace/scratch"
         if scratch_dir is None:
@@ -1323,7 +1395,8 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             comp = self._components[i]
             if comp is not None:
                 objs.append(_objective_vector(comp))
-                cvs.append(_constraint_violation(comp) if self.enforce_latency_constraint else 0.0)
+                cvs.append(_constraint_violation(comp, self.latency_threshold_ms)
+                           if self.enforce_latency_constraint else 0.0)
                 valid_idx.append(i)
 
         rank  = [len(valid_idx) + 1] * n   # pire rang par défaut (invalides)
@@ -1728,7 +1801,10 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         payload = {
             "metadata": {
                 "etape": 2, "methode": "NSGA-II (Deb et al., 2002), dominance contrainte",
-                "latency_constraint_ms": LATENCY_CONSTRAINT_MS if self.enforce_latency_constraint else None,
+                "latency_constraint_ms": self.latency_threshold_ms if self.enforce_latency_constraint else None,
+                "latency_penalty": ({"seuil_ms": self.latency_threshold_ms,
+                                     "forme": "min(1,(L-T)/T)" if self.latency_penalty_capped else "10((L-T)/T)^2"}
+                                    if self.enable_latency_penalty else None),
                 "n_front": len(self._pareto_archive),
                 "objectives": ["MCC_clipped (max)", "PR_AUC (max)", "Brier (min)", "R2_symbolic (max)"],
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1783,22 +1859,24 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         n_feat = {"brut": len(RAW_NUMERIC_COLS) + len(ACTION_ONEHOT_COLS),
                   "traite": len(PROCESSED_FEATURE_COLS)}
         train_threads = torch.get_num_threads()
-        if self.latency_num_threads:
-            torch.set_num_threads(self.latency_num_threads)
         out = {}
-        try:
-            for i, ind in to_eval:
-                if not validate_individual(ind):
-                    continue
-                try:
-                    input_size = n_feat[_REGIME_TO_NIVEAU1[ind["Input_Regime"]]]
-                    model = build_model_from_individual(ind, input_size)
-                    out[i] = _measure_latency_ms(model, int(ind["W"]), input_size)
-                    del model
-                except Exception:   # noqa: BLE001  repli sur la mesure dans compute_fitness
-                    pass
-        finally:
-            torch.set_num_threads(train_threads)
+        # Coeurs reserves d'abord (fils torch crees pour la mesure places dessus), puis nombre de fils de mesure.
+        with coeurs_latence():
+            if self.latency_num_threads:
+                torch.set_num_threads(self.latency_num_threads)
+            try:
+                for i, ind in to_eval:
+                    if not validate_individual(ind):
+                        continue
+                    try:
+                        input_size = n_feat[_REGIME_TO_NIVEAU1[ind["Input_Regime"]]]
+                        model = build_model_from_individual(ind, input_size)
+                        out[i] = _measure_latency_ms(model, int(ind["W"]), input_size)
+                        del model
+                    except Exception:   # noqa: BLE001  repli sur la mesure dans compute_fitness
+                        pass
+            finally:
+                torch.set_num_threads(train_threads)
         return out
 
     def _evaluer_generation(self, gen: int, df_train, df_val, device) -> None:
@@ -1886,7 +1964,10 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
                                          rng_lock=self._rng_lock,
                                          regime_cache=self._regime_cache,
                                          latency_ms_override=latency_ms_override,
-                                         enable_latency_penalty=self.enable_latency_penalty)
+                                         enable_latency_penalty=self.enable_latency_penalty,
+                                         latency_threshold_ms=self.latency_threshold_ms,
+                                         latency_penalty_capped=self.latency_penalty_capped,
+                                         r2_threshold=self.r2_threshold, grid_init=self.grid_init)
             except Exception as exc:   # noqa: BLE001  robustesse absolue (section 14)
                 result = {"fitness_total": None, "fitness_components": None,
                           "model_state": None,
@@ -1956,8 +2037,8 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
         obj_c = _objective_vector(cand_comp)
         obj_b = _objective_vector(best_comp)
         if self.enforce_latency_constraint:
-            cv_c = _constraint_violation(cand_comp)
-            cv_b = _constraint_violation(best_comp)
+            cv_c = _constraint_violation(cand_comp, self.latency_threshold_ms)
+            cv_b = _constraint_violation(best_comp, self.latency_threshold_ms)
         else:
             cv_c = cv_b = 0.0
         if _constrained_dominates(obj_c, cv_c, obj_b, cv_b):
@@ -2009,7 +2090,8 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             return
 
         objs = [_objective_vector(c["fitness_components"]) for c in pool]
-        cvs = [(_constraint_violation(c["fitness_components"]) if self.enforce_latency_constraint else 0.0)
+        cvs = [(_constraint_violation(c["fitness_components"], self.latency_threshold_ms)
+                if self.enforce_latency_constraint else 0.0)
                for c in pool]
         fronts = _fast_non_dominated_sort(objs, cvs)
         non_dominated = [pool[i] for i in fronts[0]] if fronts else []
@@ -2372,7 +2454,7 @@ class ExtendedHeuristicSearch(RechercheHeuristique):
             top = []
         else:
             objs = [_objective_vector(r["components"]) for r in rows]
-            cvs  = [_constraint_violation(r["components"]) for r in rows]
+            cvs  = [_constraint_violation(r["components"], self.latency_threshold_ms) for r in rows]
             fronts = _fast_non_dominated_sort(objs, cvs)
             ordered_idx = []
             for front in fronts:

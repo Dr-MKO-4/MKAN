@@ -46,6 +46,12 @@ N_GRID_SAMPLES = 100_000    # valeurs x_t tirees des fenetres d'entrainement pou
 # ── Latence (decision du 03/11) : seuil 500 ms, penalite plafonnee ──
 LATENCY_THRESHOLD_MS = 500.0
 LATENCY_CAPPED = True
+LATENCY_THREADS = 4               # fils torch de la mesure de latence (measure_latency.py, recherche : 13/11)
+# Coeurs reserves a la mesure de latence pendant la chaine (13/11, accord de Miguel) : les entrainements sont
+# confines a TRAIN_CORES, les mesures de la recherche et de Sobol se font seules sur LATENCY_CORES.
+_N_COEURS = os.cpu_count() or 8
+LATENCY_CORES = f"{_N_COEURS - LATENCY_THREADS}-{_N_COEURS - 1}"
+TRAIN_CORES = f"0-{_N_COEURS - LATENCY_THREADS - 1}"
 
 # ── Nouvelle Etape 4 ──
 ETAPE4 = dict(
