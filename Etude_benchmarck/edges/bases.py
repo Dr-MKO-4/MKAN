@@ -216,8 +216,37 @@ class GaussianBasis(_LegacyGridLoad, nn.Module):
         h = (self.centers[start_col:, -1] - self.centers[start_col:, 0]) / (self.M - 1)
         self.neg_half_over_h2[start_col:, 0] = -0.5 * h.pow(-2)
 
+    @torch.no_grad()
+    def extend(self, col: int, x_l: float, x_r: float, delta: int, samples=None) -> None:
+        """Extension locale (equivalent de la Grid Extension pour une grille de cloches) : delta gaussiennes
+        par arete de col, centres uniformes dans [x_l, x_r], largeur (x_r - x_l) / delta, poids nul : la
+        fonction apprise est conservee exactement a l'insertion."""
+        _etendre_cloches(self, "neg_half_over_h2", lambda h: -0.5 / (h * h), col, x_l, x_r, delta)
+
     def l1_norm(self) -> torch.Tensor:
         return self.weight.abs().sum()
+
+
+def _etendre_cloches(base: nn.Module, nom_largeur: str, depuis_h, col: int, x_l: float, x_r: float,
+                     delta: int) -> None:
+    """Cloches sur grille fixe (FastKAN, FasterKAN) : la largeur devient propre a chaque fonction
+    (buffer (in, M) au lieu de (in, 1)) pour que les delta nouvelles cloches de col soient plus fines que
+    la grille d'origine. Autres colonnes : copies de la derniere cloche, de poids nul et figees a zero
+    (tenseur rectangulaire, meme regle que les ondelettes et ReLU-KAN)."""
+    n_old = base.centers.shape[1]
+    largeur = getattr(base, nom_largeur)
+    if largeur.shape[1] == 1:
+        largeur = largeur.expand(-1, n_old).clone()
+    centres = base.centers[:, -1:].repeat(1, delta)
+    centres[col] = torch.linspace(x_l, x_r, delta, dtype=centres.dtype)
+    nouv = largeur[:, -1:].repeat(1, delta)
+    nouv[col] = depuis_h(max((x_r - x_l) / delta, 1e-3))
+    base.centers = torch.cat([base.centers, centres], dim=1)
+    setattr(base, nom_largeur, torch.cat([largeur, nouv], dim=1))
+    base.M = base.centers.shape[1]
+    zeros = torch.zeros(*base.weight.shape[:2], delta, dtype=base.weight.dtype)
+    base.weight = nn.Parameter(torch.cat([base.weight, zeros], dim=-1))
+    _figer_nouvelles(base, ("weight",), col, n_old)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -252,6 +281,13 @@ class RSWAFBasis(_LegacyGridLoad, nn.Module):
         _fit_uniform_rbf(self.centers, samples, start_col, self.M)
         h = (self.centers[start_col:, -1] - self.centers[start_col:, 0]) / (self.M - 1)
         self.inv_h[start_col:, 0] = h.reciprocal()
+
+    @torch.no_grad()
+    def extend(self, col: int, x_l: float, x_r: float, delta: int, samples=None) -> None:
+        """Extension locale (equivalent de la Grid Extension pour une grille de cloches) : delta cloches
+        1 - tanh^2 par arete de col, centres uniformes dans [x_l, x_r], largeur (x_r - x_l) / delta, poids
+        nul : la fonction apprise est conservee exactement a l'insertion."""
+        _etendre_cloches(self, "inv_h", lambda h: 1.0 / h, col, x_l, x_r, delta)
 
     def l1_norm(self) -> torch.Tensor:
         return self.weight.abs().sum()

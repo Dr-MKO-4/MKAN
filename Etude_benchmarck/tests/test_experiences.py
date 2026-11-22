@@ -26,7 +26,8 @@ def _couche(nom, in_f=6, out_f=4, **kw):
 
 @pytest.mark.parametrize("nom,kw", [("wavkan", {"wavelet": "dog", "n_wavelets": 3}),
                                     ("wavkan", {"wavelet": "morlet", "n_wavelets": 4}),
-                                    ("relukan", {"n_bases": 8}), ("hybrid", {})])
+                                    ("relukan", {"n_bases": 8}), ("hybrid", {}),
+                                    ("fasterkan", {"M": 8}), ("fastkan", {"M": 8})])
 def test_poids_nul_conserve_la_fonction(nom, kw):
     c = _couche(nom, **kw)
     x = torch.linspace(-3, 3, 200)[:, None].repeat(1, 6)
@@ -123,6 +124,30 @@ def test_noeud_produit_dans_le_modele():
     sans = build_model({**spec, "mult_pairs": None}, 5)
     assert sum(p.numel() for p in m.parameters()) == sum(p.numel() for p in sans.parameters())
     assert m(torch.rand(4, 3, 5)).shape == (4,)
+
+
+@pytest.mark.parametrize("nom", ["fasterkan", "fastkan"])
+def test_cloches_seules_les_nouvelles_de_la_colonne_apprennent(nom):
+    c = _couche(nom, M=8)
+    c.basis.extend(2, 0.5, 2.0, 4)
+    assert c.basis.weight.shape[-1] == 12 and c.basis.centers.shape[-1] == 12
+    x = torch.rand(64, 6) * 2.5
+    c(x).sum().backward()
+    g = c.basis.weight.grad
+    assert g[2, :, 8:].abs().sum() > 0
+    assert g[0, :, 8:].abs().sum() == 0 and g[5, :, 8:].abs().sum() == 0
+
+
+def test_etendre_le_modele_retenu_conserve_le_score():
+    from train_run import build_model
+    base = {"Forget": "fasterkan", "Input": "fasterkan", "Candidate": "wavkan_dog"}
+    torch.manual_seed(0)
+    m = build_model({"cell_type": "gru", "base_by_gate": base, "hidden_size": 8}, 5).eval()
+    x = torch.rand(16, 4, 5)
+    avant = m(x).detach().clone()
+    n = etendre_modele(m, [(2, 0.0, 1.0)], 5, 4, torch.rand(500, 5))
+    assert n == 3                                         # les trois portes, FasterKAN comprises
+    assert torch.allclose(m(x), avant, atol=1e-5)
 
 
 def test_etendre_modele_conserve_le_score_avec_bases_a_poids_nul():
